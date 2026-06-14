@@ -1,0 +1,12 @@
+# Legacy serverless handler — use pyproject.toml + backend/ai_server.py
+api/
+
+# Root build output only (not frontend/public — CRA needs that)
+/public/
+/frontend/build/
+frontend/node_modules/
+backend/venv/
+.venv/
+**/__pycache__/
+*.pyc
+.cache/

@@ -1,0 +1,13 @@
+# Supabase-only: Mongo yok. AI proxy opsiyonel (ders sohbeti / TTS).
+services:
+  ai:
+    build:
+      context: .
+      dockerfile: Dockerfile.ai
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    env_file:
+      - backend/.env
+    environment:
+      CORS_ORIGINS: "*"

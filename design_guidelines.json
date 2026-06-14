@@ -1,0 +1,89 @@
+{
+  "theme": "dark",
+  "archetype": "5 (Jewel & Luxury) mixed with Glassmorphism 2.0",
+  "design_philosophy": "Premium AI Voice Interaction UI. Distraction-free, immersive, 'Liquid Glass' aesthetic. Dark slate base to reduce cognitive load during language learning, infused with deep indigo (brand/AI) and glowing emerald (success/coach corrections).",
+  "colors": {
+    "background": {
+      "base": "bg-[#0A0A0E] text-slate-50",
+      "surface": "bg-slate-900/40",
+      "glass": "bg-white/5 backdrop-blur-2xl border border-white/10"
+    },
+    "brand": {
+      "primary": "indigo-500",
+      "primary_hover": "indigo-400",
+      "primary_glow": "shadow-[0_0_24px_rgba(99,102,241,0.4)]"
+    },
+    "accent": {
+      "success": "emerald-400",
+      "success_hover": "emerald-300",
+      "success_glow": "shadow-[0_0_24px_rgba(52,211,153,0.4)]"
+    },
+    "text": {
+      "heading": "text-white",
+      "body": "text-slate-300",
+      "muted": "text-slate-500"
+    }
+  },
+  "typography": {
+    "font_families": {
+      "heading": "Outfit, sans-serif",
+      "body": "Manrope, sans-serif"
+    },
+    "rules": {
+      "h1": "text-5xl sm:text-6xl font-medium tracking-tight leading-tight",
+      "h2": "text-3xl sm:text-4xl font-medium tracking-tight",
+      "h3": "text-xl sm:text-2xl font-medium",
+      "body": "text-base leading-relaxed text-slate-300",
+      "overline": "text-xs font-bold tracking-[0.2em] uppercase text-indigo-400"
+    }
+  },
+  "layout": {
+    "spacing": "Generous spacing. Use p-8 or p-12 for containers to allow glassmorphism to breathe.",
+    "grid_system": "Bento grid for Admin Dashboard and Level selection. Centered focused layouts for the Lesson Session.",
+    "cards": "Never use solid borders for cards. Always use Glassmorphism (bg-white/5 backdrop-blur-2xl border border-white/10). No sharp edges; use rounded-2xl or rounded-3xl."
+  },
+  "components": {
+    "buttons": {
+      "primary": "bg-indigo-600 hover:bg-indigo-500 text-white font-medium rounded-full px-8 py-4 transition-all duration-300 hover:shadow-[0_0_24px_rgba(99,102,241,0.4)]",
+      "secondary_glass": "bg-white/5 hover:bg-white/10 border border-white/10 text-white font-medium rounded-full px-8 py-4 backdrop-blur-md transition-all duration-300"
+    },
+    "header": "Sticky with 'Crystal Glass' effect (bg-black/40 backdrop-blur-xl border-b border-white/10). Must not block hero content.",
+    "correction_card": "Emerges dynamically (Framer Motion). Glassmorphic panel with Emerald accent border (border-emerald-500/30) and subtle inner glow.",
+    "audio_visualizer": "Central hero element during Lesson Session. Multiple animated vertical bars or radiating rings using Indigo and Emerald gradients.",
+    "vocabulary_hint": "Floating badge or subtle side-panel using soft slate glassmorphism. Text should be legible (white text on dark glass)."
+  },
+  "motion_and_interaction": {
+    "page_transitions": "Smooth fade and slight vertical lift (opacity 0 to 1, y: 10 to 0) using framer-motion.",
+    "hover_states": "All glass cards lift slightly (-translate-y-1) and increase border opacity (border-white/20).",
+    "voice_active": "Pulsing animation around the microphone button and active sound wave rendering."
+  },
+  "media": {
+    "images": [
+      {
+        "category": "hero_background",
+        "url": "https://images.unsplash.com/photo-1774997391540-dfaf4bf0620b?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2NDN8MHwxfHNlYXJjaHwxfHxhYnN0cmFjdCUyMGRhcmslMjBncmVlbiUyMGJsdWUlMjB3YXZlc3xlbnwwfHx8fDE3NzU0NTY2MzV8MA&ixlib=rb-4.1.0&q=85",
+        "description": "Abstract dark blue and black wavy pattern, perfect for the landing page background behind glassmorphism panels."
+      },
+      {
+        "category": "dashboard_texture",
+        "url": "https://images.unsplash.com/photo-1760224254117-7a40f7f03fe2?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzR8MHwxfHNlYXJjaHwyfHxwcmVtaXVtJTIwYWJzdHJhY3QlMjBkYXJrJTIwYmFja2dyb3VuZHxlbnwwfHx8fDE3NzU0NTY2MjJ8MA&ixlib=rb-4.1.0&q=85",
+        "description": "Dark blue fabric with soft light reflections for ambient background in the dashboard."
+      },
+      {
+        "category": "lesson_session_accent",
+        "url": "https://images.unsplash.com/photo-1760112783563-514867b4c2ed?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2NDN8MHwxfHNlYXJjaHwzfHxhYnN0cmFjdCUyMGRhcmslMjBncmVlbiUyMGJsdWUlMjB3YXZlc3xlbnwwfHx8fDE3NzU0NTY2MzV8MA&ixlib=rb-4.1.0&q=85",
+        "description": "Abstract glowing neon streaks for dynamic highlights during voice coaching."
+      }
+    ]
+  },
+  "instructions_to_main_agent": [
+    "Strictly adhere to the dark theme and glassmorphism aesthetic specified.",
+    "Ensure all backgrounds beneath glass layers use the provided media URLs with absolute positioning, object-cover, and appropriate opacity (e.g., opacity-30).",
+    "Install and use 'framer-motion' for all UI animations (correction cards entering, audio waves).",
+    "Use 'lucide-react' for all icons. Ensure they are sized appropriately and inherit text color.",
+    "Add 'data-testid' attributes to all interactive elements (buttons, inputs, links).",
+    "Use standard raw HTML elements with Tailwind instead of heavily abstracted UI library wrappers for complex marketing layouts to preserve custom spacing and glass styles.",
+    "For the audio visualizer, simulate the Gemini Live API real-time voice using CSS/Framer motion arrays if actual audio stream mapping is too complex for the MVP.",
+    "In Tailwind config, make sure to add 'Outfit' and 'Manrope' to theme.extend.fontFamily."
+  ]
+}

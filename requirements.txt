@@ -1,0 +1,11 @@
+# Vercel Python — ai_server (minimal)
+fastapi==0.110.1
+uvicorn==0.25.0
+python-dotenv==1.2.2
+httpx==0.28.1
+PyJWT==2.12.1
+pydantic==2.12.5
+edge-tts>=6.1.0
+python-multipart==0.0.22
+starlette==0.37.2
+supabase>=2.0.0
