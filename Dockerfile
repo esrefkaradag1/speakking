@@ -4,6 +4,16 @@ WORKDIR /app/frontend
 COPY frontend/package.json frontend/yarn.lock ./
 RUN yarn install --frozen-lockfile
 COPY frontend/ ./
+# Frontend env vars passed from Dokploy Build-time Arguments
+ARG REACT_APP_SUPABASE_URL
+ENV REACT_APP_SUPABASE_URL=$REACT_APP_SUPABASE_URL
+ARG REACT_APP_SUPABASE_ANON_KEY
+ENV REACT_APP_SUPABASE_ANON_KEY=$REACT_APP_SUPABASE_ANON_KEY
+ARG REACT_APP_DID_API_KEY
+ENV REACT_APP_DID_API_KEY=$REACT_APP_DID_API_KEY
+ARG REACT_APP_DID_ENABLED
+ENV REACT_APP_DID_ENABLED=$REACT_APP_DID_ENABLED
+
 # Bos = ayni origin /api (tek sunucu)
 ENV REACT_APP_BACKEND_URL=
 RUN yarn build
