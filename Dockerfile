@@ -30,4 +30,4 @@ COPY --from=frontend /app/frontend/build /app/frontend/build
 ENV FRONTEND_BUILD_PATH=/app/frontend/build
 ENV PYTHONUNBUFFERED=1
 EXPOSE 8000
-CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "ai_server:app", "--host", "0.0.0.0", "--port", "8000"]
