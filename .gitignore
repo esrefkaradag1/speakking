@@ -28,7 +28,6 @@ next-env.d.ts
 # Production builds
 /build
 dist/
-public/
 backend/static/
 dist
 
