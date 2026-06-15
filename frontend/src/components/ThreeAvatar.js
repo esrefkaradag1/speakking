@@ -118,7 +118,7 @@ export default function ThreeAvatar({ active, audioRef, isTalking, className = '
     }
 
     const loop = () => {
-      if (analyserRef.current && head.mtAvatar) {
+      if (analyserRef.current && head.avatar) {
         let volume = 0;
 
         if (audioRef.current && !audioRef.current.paused && isTalking) {
@@ -140,8 +140,16 @@ export default function ThreeAvatar({ active, audioRef, isTalking, className = '
           }
         }
 
-        // Map volume to intensity, increase sensitivity slightly
+        // Map volume to intensity
         const intensity = Math.min(volume / 20, 1.0);
+        
+        // Find meshes with morph targets
+        const meshes = [];
+        head.avatar.traverse((node) => {
+          if (node.isMesh && node.morphTargetDictionary && node.morphTargetInfluences) {
+            meshes.push(node);
+          }
+        });
 
         if (intensity > 0.05) {
           // Pseudo-randomly pick a viseme based on time
@@ -150,47 +158,52 @@ export default function ThreeAvatar({ active, audioRef, isTalking, className = '
           
           let visemeFound = false;
 
-          speechVisemes.forEach((v, idx) => {
-            if (head.mtAvatar[v]) {
-              visemeFound = true;
-              const targetVal = idx === visemeIndex ? intensity : 0;
-              const currentVal = head.mtAvatar[v].realtime || 0;
-              head.mtAvatar[v].realtime = currentVal + (targetVal - currentVal) * 0.5;
-              head.mtAvatar[v].needsUpdate = true;
-            }
-          });
+          meshes.forEach((mesh) => {
+            speechVisemes.forEach((v, idx) => {
+              const targetIdx = mesh.morphTargetDictionary[v];
+              if (targetIdx !== undefined) {
+                visemeFound = true;
+                const targetVal = idx === visemeIndex ? intensity : 0;
+                const currentVal = mesh.morphTargetInfluences[targetIdx];
+                mesh.morphTargetInfluences[targetIdx] = currentVal + (targetVal - currentVal) * 0.5;
+              }
+            });
 
-          // If no RPM visemes exist, use the fallback
-          if (!visemeFound && fallbackBlendshape && head.mtAvatar[fallbackBlendshape]) {
-            const currentVal = head.mtAvatar[fallbackBlendshape].realtime || 0;
-            head.mtAvatar[fallbackBlendshape].realtime = currentVal + (intensity - currentVal) * 0.5;
-            head.mtAvatar[fallbackBlendshape].needsUpdate = true;
-          }
-        } else {
-          // Fade all visemes to 0, then release control
-          speechVisemes.forEach(v => {
-            if (head.mtAvatar[v]) {
-              const currentVal = head.mtAvatar[v].realtime || 0;
-              if (currentVal > 0.05) {
-                head.mtAvatar[v].realtime = currentVal * 0.5;
-                head.mtAvatar[v].needsUpdate = true;
-              } else if (head.mtAvatar[v].realtime !== null) {
-                head.mtAvatar[v].realtime = null; // release
-                head.mtAvatar[v].needsUpdate = true;
+            if (!visemeFound && fallbackBlendshape) {
+              const targetIdx = mesh.morphTargetDictionary[fallbackBlendshape];
+              if (targetIdx !== undefined) {
+                const currentVal = mesh.morphTargetInfluences[targetIdx];
+                mesh.morphTargetInfluences[targetIdx] = currentVal + (intensity - currentVal) * 0.5;
               }
             }
           });
+        } else {
+          // Fade all visemes to 0
+          meshes.forEach((mesh) => {
+            speechVisemes.forEach((v) => {
+              const targetIdx = mesh.morphTargetDictionary[v];
+              if (targetIdx !== undefined) {
+                const currentVal = mesh.morphTargetInfluences[targetIdx];
+                if (currentVal > 0.05) {
+                  mesh.morphTargetInfluences[targetIdx] = currentVal * 0.5;
+                } else {
+                  mesh.morphTargetInfluences[targetIdx] = 0;
+                }
+              }
+            });
 
-          if (fallbackBlendshape && head.mtAvatar[fallbackBlendshape]) {
-            const currentVal = head.mtAvatar[fallbackBlendshape].realtime || 0;
-            if (currentVal > 0.05) {
-                head.mtAvatar[fallbackBlendshape].realtime = currentVal * 0.5;
-                head.mtAvatar[fallbackBlendshape].needsUpdate = true;
-            } else if (head.mtAvatar[fallbackBlendshape].realtime !== null) {
-                head.mtAvatar[fallbackBlendshape].realtime = null;
-                head.mtAvatar[fallbackBlendshape].needsUpdate = true;
+            if (fallbackBlendshape) {
+              const targetIdx = mesh.morphTargetDictionary[fallbackBlendshape];
+              if (targetIdx !== undefined) {
+                const currentVal = mesh.morphTargetInfluences[targetIdx];
+                if (currentVal > 0.05) {
+                  mesh.morphTargetInfluences[targetIdx] = currentVal * 0.5;
+                } else {
+                  mesh.morphTargetInfluences[targetIdx] = 0;
+                }
+              }
             }
-          }
+          });
         }
       }
 
