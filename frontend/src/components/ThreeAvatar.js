@@ -109,9 +109,16 @@ export default function ThreeAvatar({ active, audioRef, isTalking, className = '
     // Common speech visemes for RPM / TalkingHead
     const speechVisemes = ['viseme_aa', 'viseme_E', 'viseme_I', 'viseme_O', 'viseme_U'];
     
-    // We will dynamically find a fallback blendshape from the meshes array
+    // Check if the avatar has jawOpen or mouthOpen as fallback
     let fallbackBlendshape = null;
-
+    // We must wait until head.mtAvatar is populated by TalkingHead
+    const getFallback = () => {
+      if (!headRef.current || !headRef.current.mtAvatar) return null;
+      if (headRef.current.mtAvatar['jawOpen']) return 'jawOpen';
+      if (headRef.current.mtAvatar['mouthOpen']) return 'mouthOpen';
+      if (headRef.current.mtAvatar['viseme_O']) return 'viseme_O';
+      return null;
+    };
     const loop = () => {
       // Lazy init AudioContext if missing
       if (!analyserRef.current && audioRef?.current) {
@@ -156,80 +163,48 @@ export default function ThreeAvatar({ active, audioRef, isTalking, className = '
           }
         }
 
-        // Map volume to intensity
-        const intensity = Math.min(volume / 20, 1.0);
-        
-        // Find meshes with morph targets
-        const meshes = [];
-        const rootNode = head.scene || head.armature || head.avatarNode || head.ikMesh;
-        if (rootNode) {
-          rootNode.traverse((node) => {
-            if (node.isMesh && node.morphTargetDictionary && node.morphTargetInfluences) {
-              meshes.push(node);
-              if (!fallbackBlendshape) {
-                if (node.morphTargetDictionary['jawOpen'] !== undefined) fallbackBlendshape = 'jawOpen';
-                else if (node.morphTargetDictionary['mouthOpen'] !== undefined) fallbackBlendshape = 'mouthOpen';
-                else if (node.morphTargetDictionary['viseme_O'] !== undefined) fallbackBlendshape = 'viseme_O';
-              }
-            }
-          });
-        }
-
-        if (intensity > 0.05) {
-          // Pseudo-randomly pick a viseme based on time
-          const time = Date.now();
-          const visemeIndex = Math.floor(time / 150) % speechVisemes.length;
+          // Map volume to intensity
+          const intensity = Math.min(volume / 20, 1.0);
           
-          let visemeFound = false;
+          if (!fallbackBlendshape) {
+            fallbackBlendshape = getFallback();
+          }
 
-          meshes.forEach((mesh) => {
-            speechVisemes.forEach((v, idx) => {
-              const targetIdx = mesh.morphTargetDictionary[v];
-              if (targetIdx !== undefined) {
-                visemeFound = true;
-                const targetVal = idx === visemeIndex ? intensity : 0;
-                const currentVal = mesh.morphTargetInfluences[targetIdx];
-                mesh.morphTargetInfluences[targetIdx] = currentVal + (targetVal - currentVal) * 0.5;
+          if (head.mtAvatar) {
+            if (intensity > 0.05) {
+              const time = Date.now();
+              const visemeIndex = Math.floor(time / 150) % speechVisemes.length;
+              let visemeFound = false;
+
+              speechVisemes.forEach((v, idx) => {
+                if (head.mtAvatar[v]) {
+                  visemeFound = true;
+                  const targetVal = idx === visemeIndex ? intensity : 0;
+                  // Lerp the value slightly for smoothness or just set realtime
+                  const currentVal = head.mtAvatar[v].realtime || 0;
+                  head.mtAvatar[v].realtime = currentVal + (targetVal - currentVal) * 0.5;
+                }
+              });
+
+              if (!visemeFound && fallbackBlendshape && head.mtAvatar[fallbackBlendshape]) {
+                const currentVal = head.mtAvatar[fallbackBlendshape].realtime || 0;
+                head.mtAvatar[fallbackBlendshape].realtime = currentVal + (intensity - currentVal) * 0.5;
               }
-            });
-
-            if (!visemeFound && fallbackBlendshape) {
-              const targetIdx = mesh.morphTargetDictionary[fallbackBlendshape];
-              if (targetIdx !== undefined) {
-                const currentVal = mesh.morphTargetInfluences[targetIdx];
-                mesh.morphTargetInfluences[targetIdx] = currentVal + (intensity - currentVal) * 0.5;
+            } else {
+              // Fade out visemes
+              speechVisemes.forEach((v) => {
+                if (head.mtAvatar[v]) {
+                  const currentVal = head.mtAvatar[v].realtime || 0;
+                  head.mtAvatar[v].realtime = currentVal > 0.05 ? currentVal * 0.5 : 0;
+                }
+              });
+              if (fallbackBlendshape && head.mtAvatar[fallbackBlendshape]) {
+                const currentVal = head.mtAvatar[fallbackBlendshape].realtime || 0;
+                head.mtAvatar[fallbackBlendshape].realtime = currentVal > 0.05 ? currentVal * 0.5 : 0;
               }
             }
-          });
-        } else {
-          // Fade all visemes to 0
-          meshes.forEach((mesh) => {
-            speechVisemes.forEach((v) => {
-              const targetIdx = mesh.morphTargetDictionary[v];
-              if (targetIdx !== undefined) {
-                const currentVal = mesh.morphTargetInfluences[targetIdx];
-                if (currentVal > 0.05) {
-                  mesh.morphTargetInfluences[targetIdx] = currentVal * 0.5;
-                } else {
-                  mesh.morphTargetInfluences[targetIdx] = 0;
-                }
-              }
-            });
-
-            if (fallbackBlendshape) {
-              const targetIdx = mesh.morphTargetDictionary[fallbackBlendshape];
-              if (targetIdx !== undefined) {
-                const currentVal = mesh.morphTargetInfluences[targetIdx];
-                if (currentVal > 0.05) {
-                  mesh.morphTargetInfluences[targetIdx] = currentVal * 0.5;
-                } else {
-                  mesh.morphTargetInfluences[targetIdx] = 0;
-                }
-              }
-            }
-          });
+          }
         }
-      }
 
       requestRef.current = requestAnimationFrame(loop);
     };
