@@ -113,20 +113,41 @@ export default function ThreeAvatar({ active, audioRef, isTalking, className = '
     let fallbackBlendshape = null;
 
     const loop = () => {
-      if (analyserRef.current && head) {
+      // Lazy init AudioContext if missing
+      if (!analyserRef.current && audioRef?.current) {
+        try {
+          if (!audioRef.current._audioContext) {
+            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const analyserNode = audioContext.createAnalyser();
+            analyserNode.fftSize = 64;
+            const source = audioContext.createMediaElementSource(audioRef.current);
+            source.connect(analyserNode);
+            analyserNode.connect(audioContext.destination);
+            audioRef.current._audioContext = audioContext;
+            audioRef.current._analyserNode = analyserNode;
+          }
+          analyserRef.current = audioRef.current._analyserNode;
+        } catch (e) {
+          console.warn("AudioContext init failed:", e);
+        }
+      }
+
+      if (head) {
         let volume = 0;
 
         if (audioRef.current && !audioRef.current.paused && isTalking) {
-          const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
-          analyserRef.current.getByteFrequencyData(dataArray);
+          if (analyserRef.current) {
+            const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
+            analyserRef.current.getByteFrequencyData(dataArray);
 
-          let sum = 0;
-          for(let i=0; i<dataArray.length; i++) {
-             sum += dataArray[i];
+            let sum = 0;
+            for(let i=0; i<dataArray.length; i++) {
+               sum += dataArray[i];
+            }
+            volume = sum / dataArray.length;
           }
-          volume = sum / dataArray.length;
 
-          // If Web Audio API fails (e.g. Safari restrictions), simulate smooth lip movement
+          // If Web Audio API fails (e.g. Safari restrictions) or returns 0, simulate smooth lip movement
           if (volume === 0) {
             const t = Date.now() / 1000;
             const envelope = (Math.sin(t * 3) + 1) / 2; // Pause occasionally
