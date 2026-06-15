@@ -183,12 +183,14 @@ export default function ThreeAvatar({ active, audioRef, isTalking, className = '
                   // Lerp the value slightly for smoothness or just set realtime
                   const currentVal = head.mtAvatar[v].realtime || 0;
                   head.mtAvatar[v].realtime = currentVal + (targetVal - currentVal) * 0.5;
+                  head.mtAvatar[v].needsUpdate = true;
                 }
               });
 
               if (!visemeFound && fallbackBlendshape && head.mtAvatar[fallbackBlendshape]) {
                 const currentVal = head.mtAvatar[fallbackBlendshape].realtime || 0;
                 head.mtAvatar[fallbackBlendshape].realtime = currentVal + (intensity - currentVal) * 0.5;
+                head.mtAvatar[fallbackBlendshape].needsUpdate = true;
               }
             } else {
               // Fade out visemes
@@ -196,11 +198,13 @@ export default function ThreeAvatar({ active, audioRef, isTalking, className = '
                 if (head.mtAvatar[v]) {
                   const currentVal = head.mtAvatar[v].realtime || 0;
                   head.mtAvatar[v].realtime = currentVal > 0.05 ? currentVal * 0.5 : 0;
+                  head.mtAvatar[v].needsUpdate = true;
                 }
               });
               if (fallbackBlendshape && head.mtAvatar[fallbackBlendshape]) {
                 const currentVal = head.mtAvatar[fallbackBlendshape].realtime || 0;
                 head.mtAvatar[fallbackBlendshape].realtime = currentVal > 0.05 ? currentVal * 0.5 : 0;
+                head.mtAvatar[fallbackBlendshape].needsUpdate = true;
               }
             }
           }
