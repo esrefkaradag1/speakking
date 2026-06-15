@@ -1027,10 +1027,13 @@ def _elevenlabs_enabled(settings: Dict) -> bool:
     return env_on or admin_on
 
 
+import asyncio
+
+cartesia_semaphore = asyncio.Semaphore(2)
+
 def _cartesia_enabled(settings: Dict) -> bool:
     # Always enabled as requested by user
     return True
-
 
 async def synthesize_cartesia_tts(text: str, api_key: str, voice_id: str, lang: str) -> Optional[bytes]:
     url = "https://api.cartesia.ai/tts/bytes"
@@ -1047,6 +1050,7 @@ async def synthesize_cartesia_tts(text: str, api_key: str, voice_id: str, lang: 
             "mode": "id",
             "id": voice_id
         },
+        "language": lang,
         "output_format": {
             "container": "mp3",
             "bit_rate": 64000,
@@ -1055,9 +1059,10 @@ async def synthesize_cartesia_tts(text: str, api_key: str, voice_id: str, lang: 
     }
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
-            r = await client.post(url, headers=headers, json=payload)
-            r.raise_for_status()
-            return r.content
+            async with cartesia_semaphore:
+                r = await client.post(url, headers=headers, json=payload)
+                r.raise_for_status()
+                return r.content
     except httpx.HTTPStatusError as e:
         logger.error("Cartesia HTTP error: %s - Body: %s", e, r.text)
         return None
