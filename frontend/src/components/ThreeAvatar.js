@@ -145,11 +145,13 @@ export default function ThreeAvatar({ active, audioRef, isTalking, className = '
         
         // Find meshes with morph targets
         const meshes = [];
-        head.avatar.traverse((node) => {
-          if (node.isMesh && node.morphTargetDictionary && node.morphTargetInfluences) {
-            meshes.push(node);
-          }
-        });
+        if (head.scene) {
+          head.scene.traverse((node) => {
+            if (node.isMesh && node.morphTargetDictionary && node.morphTargetInfluences) {
+              meshes.push(node);
+            }
+          });
+        }
 
         if (intensity > 0.05) {
           // Pseudo-randomly pick a viseme based on time
