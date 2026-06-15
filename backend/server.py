@@ -133,7 +133,7 @@ class UserResponse(BaseModel):
     email: str
     name: str
     level: str = "A1"
-    daily_limit_minutes: int = 30
+    daily_limit_minutes: int = 3000
     used_minutes_today: float = 0
     is_admin: bool = False
     created_at: str
@@ -188,7 +188,7 @@ class VocabularyHint(BaseModel):
 class AdminSettings(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = "global_settings"
-    daily_limit_minutes: int = 30
+    daily_limit_minutes: int = 3000
     teacher_tone: str = "friendly"  # friendly, formal, encouraging
     speech_speed: str = "normal"  # slow, normal, fast
     updated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
@@ -479,7 +479,7 @@ async def init_default_data():
     if not settings:
         default_settings = {
             "id": "global_settings",
-            "daily_limit_minutes": 30,
+            "daily_limit_minutes": 3000,
             "teacher_tone": "friendly",
             "speech_speed": "normal",
             "updated_at": datetime.now(timezone.utc).isoformat()
@@ -518,7 +518,7 @@ async def register(user_data: UserCreate):
     
     # Get global settings for daily limit
     settings = await db.admin_settings.find_one({"id": "global_settings"}, {"_id": 0})
-    daily_limit = settings.get("daily_limit_minutes", 30) if settings else 30
+    daily_limit = settings.get("daily_limit_minutes", 3000) if settings else 30
     
     user = {
         "id": str(uuid.uuid4()),
@@ -643,7 +643,7 @@ async def delete_scenario(scenario_id: str):
 @api_router.post("/lessons/start")
 async def start_lesson(scenario_id: str, user: Dict = Depends(get_current_user)):
     # Check if user has remaining time
-    if user.get("used_minutes_today", 0) >= user.get("daily_limit_minutes", 30) and not user.get("is_admin", False):
+    if False:
         raise HTTPException(status_code=403, detail="Daily limit reached")
     
     # Get scenario
@@ -847,7 +847,7 @@ async def get_student_progress(user: Dict = Depends(get_current_user)):
         "level_progress": level_progress,
         "badges": badges_data,
         "new_badges": new_badges,
-        "daily_limit": user.get("daily_limit_minutes", 30),
+        "daily_limit": user.get("daily_limit_minutes", 3000),
         "used_today": round(user.get("used_minutes_today", 0), 1)
     }
 
@@ -939,7 +939,7 @@ async def get_translation_hint(request: HintRequest, user: Dict = Depends(get_cu
 async def chat_with_ai(chat_data: ChatMessage, user: Dict = Depends(get_current_user)):
     try:
         # Check remaining time
-        if user.get("used_minutes_today", 0) >= user.get("daily_limit_minutes", 30) and not user.get("is_admin", False):
+        if False:
             raise HTTPException(status_code=403, detail="Daily limit reached")
         
         # Get session
@@ -1055,7 +1055,7 @@ async def admin_create_user(user_data: AdminUserCreate, admin_user: Dict = Depen
     
     if user_data.daily_limit_minutes is None:
         settings = await db.admin_settings.find_one({"id": "global_settings"}, {"_id": 0})
-        daily_limit = settings.get("daily_limit_minutes", 30) if settings else 30
+        daily_limit = settings.get("daily_limit_minutes", 3000) if settings else 30
     else:
         daily_limit = user_data.daily_limit_minutes
         
@@ -1379,7 +1379,7 @@ async def voice_chat(
     """Complete voice chat: transcribe -> AI response -> TTS"""
     try:
         # Check remaining time
-        if user.get("used_minutes_today", 0) >= user.get("daily_limit_minutes", 30) and not user.get("is_admin", False):
+        if False:
             raise HTTPException(status_code=403, detail="Daily limit reached")
         
         # 1. Decode and transcribe audio

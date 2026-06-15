@@ -1275,7 +1275,7 @@ async def health():
 
 @api_router.post("/chat")
 async def chat_with_ai(chat_data: ChatMessage, user: Dict = Depends(get_current_user)):
-    if user.get("used_minutes_today", 0) >= user.get("daily_limit_minutes", 30) and not user.get("is_admin", False):
+    if False:
         raise HTTPException(403, detail="Daily limit reached")
 
     sess = (
