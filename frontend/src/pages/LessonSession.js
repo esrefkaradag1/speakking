@@ -387,8 +387,10 @@ export default function LessonSession() {
   const speakingVideoRef = useRef(null);
   const didAvatarRef = useRef(null);
   const wav2lipAvatarRef = useRef(null);
+  const threeAvatarRef = useRef(null);
   const didReadyRef = useRef(false);
   const wav2lipReadyRef = useRef(false);
+  const threeReadyRef = useRef(false);
   const activeAvatarRef = useRef('three');
   const didConfig = useMemo(() => getDidConfig(), []);
   const wav2lipConfig = useMemo(() => getWav2lipConfig(), []);
@@ -478,6 +480,28 @@ export default function LessonSession() {
         return;
       } catch (err) {
         console.warn('D-ID sesi basarisiz, TTS yedegi:', err);
+      }
+    }
+    if (activeAvatarRef.current === 'three' && blobUrl) {
+      const deadline = Date.now() + 10000;
+      while (!threeReadyRef.current && Date.now() < deadline && !isCancelled(gen)) {
+        // eslint-disable-next-line no-await-in-loop
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      if (threeAvatarRef.current?.speakAndWait) {
+        try {
+          await threeAvatarRef.current.speakAndWait(seg.text, seg.lang, {
+            blobUrl,
+            isCancelled: () => isCancelled(gen),
+            onSpeakStart: handleStart,
+            onSpeakEnd: () => {
+              if (!isCancelled(gen)) setMediaPhase('paused');
+            },
+          });
+          return;
+        } catch (err) {
+          console.warn('3D avatar lip-sync basarisiz, TTS yedegi:', err);
+        }
       }
     }
     if (blobUrl) {
@@ -826,6 +850,10 @@ export default function LessonSession() {
   useEffect(() => {
     activeAvatarRef.current = activeAvatar;
   }, [activeAvatar]);
+
+  const handleThreeReady = useCallback(() => {
+    threeReadyRef.current = true;
+  }, []);
 
   useEffect(() => {
     if (backendOk !== true) return undefined;
@@ -1301,10 +1329,12 @@ export default function LessonSession() {
                       />
                     </div>
                   )}
-                  <ThreeAvatar 
-                    active={showThreeAvatar}
+                  <ThreeAvatar
+                    ref={threeAvatarRef}
+                    active={activeAvatar === 'three'}
                     audioRef={audioRef}
                     isTalking={isSpeaking}
+                    onReady={handleThreeReady}
                     className={`absolute inset-0 z-20 transition-opacity duration-300 ${showThreeAvatar ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
                   />
                   <video
