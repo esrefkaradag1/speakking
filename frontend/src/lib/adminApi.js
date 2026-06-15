@@ -1,4 +1,6 @@
 import { supabase } from './supabase';
+import axios from 'axios';
+import { getAuthHeaders, getAiApiBase } from './apiAuth';
 
 // ---------- Sentences ----------
 export async function getSentences(level) {
@@ -184,6 +186,16 @@ export async function updateAdminUserProfile(userId, updates) {
     .single();
   if (error) throw new Error(formatSupabaseError(error));
   return data;
+}
+
+export async function updateAdminUserPassword(userId, newPassword) {
+  const headers = await getAuthHeaders();
+  const res = await axios.put(
+    `${getAiApiBase()}/admin/users/${userId}/password`,
+    { password: newPassword },
+    { headers }
+  );
+  return res.data;
 }
 
 // ---------- Stats ----------

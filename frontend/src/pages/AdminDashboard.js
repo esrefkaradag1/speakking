@@ -1344,6 +1344,9 @@ export default function AdminDashboard() {
           daily_limit_minutes: addUserForm.daily_limit_minutes,
           is_admin: addUserForm.is_admin,
         });
+        if (addUserForm.password) {
+          await adminApi.updateAdminUserPassword(editingUser.id, addUserForm.password);
+        }
         toast.success('Kullanici guncellendi');
       } else {
         await adminApi.createAdminUser(addUserForm);
@@ -2317,13 +2320,11 @@ export default function AdminDashboard() {
               <Input type="email" value={addUserForm.email} onChange={e => setAddUserForm(f => ({...f, email: e.target.value}))}
                 className="bg-white/5 border-white/10 text-white mt-1" required disabled={!!editingUser} placeholder="Orn: ahmet@ornek.com" />
             </div>
-            {!editingUser && (
-              <div>
-                <Label className="text-slate-300">Sifre</Label>
-                <Input type="password" value={addUserForm.password} onChange={e => setAddUserForm(f => ({...f, password: e.target.value}))}
-                  className="bg-white/5 border-white/10 text-white mt-1" required placeholder="En az 6 karakter" />
-              </div>
-            )}
+            <div>
+              <Label className="text-slate-300">{editingUser ? 'Yeni Sifre (Opsiyonel)' : 'Sifre'}</Label>
+              <Input type="password" value={addUserForm.password} onChange={e => setAddUserForm(f => ({...f, password: e.target.value}))}
+                className="bg-white/5 border-white/10 text-white mt-1" required={!editingUser} placeholder={editingUser ? "Degistirmek istemiyorsaniz bos birakin" : "En az 6 karakter"} />
+            </div>
             <div className="flex gap-3">
               <div className="flex-1">
                 <Label className="text-slate-300">Seviye</Label>

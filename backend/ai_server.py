@@ -1119,6 +1119,19 @@ async def synthesize_edge_tts(text: str, speed: float = 1.0, lang: Optional[str]
     return audio
 
 
+class PasswordUpdate(BaseModel):
+    password: str
+
+@api_router.put("/admin/users/{user_id}/password")
+async def update_user_password(user_id: str, payload: PasswordUpdate, user: Dict = Depends(get_admin_user)):
+    try:
+        # update_user_by_id takes attributes dict
+        res = sb.auth.admin.update_user_by_id(user_id, attributes={"password": payload.password})
+        return {"message": "Sifre guncellendi", "success": True}
+    except Exception as e:
+        logger.error(f"Sifre degistirme hatasi: {e}")
+        raise HTTPException(500, detail=f"Sifre güncellenemedi: {str(e)}")
+
 @api_router.get("/admin/prompt-status")
 async def admin_prompt_status(
     sentence_count: int = 0,
