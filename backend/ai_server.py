@@ -1028,9 +1028,8 @@ def _elevenlabs_enabled(settings: Dict) -> bool:
 
 
 def _cartesia_enabled(settings: Dict) -> bool:
-    env_on = os.environ.get("TTS_USE_CARTESIA", "false").lower() in ("1", "true", "yes", "on")
-    admin_on = settings.get("use_cartesia") in (True, "true", "t", 1, "1")
-    return env_on or admin_on
+    # Always enabled as requested by user
+    return True
 
 
 async def synthesize_cartesia_tts(text: str, api_key: str, voice_id: str, lang: str) -> Optional[bytes]:
@@ -1080,12 +1079,8 @@ async def synthesize_speech(
         (settings.get("elevenlabs_voice_id") or "").strip() or ELEVENLABS_DEFAULT_VOICE_ID
     )
     
-    cartesia_key = (settings.get("cartesia_api_key") or "").strip() or (
-        os.environ.get("CARTESIA_API_KEY") or ""
-    ).strip()
-    cartesia_voice_id = (
-        (settings.get("cartesia_voice_id") or "").strip() or "db6b0ed5-d5d3-463d-ae85-518a07d3c2b4"
-    )
+    cartesia_key = "sk_car_rnTaKhDMpvj3UYLd8szTPB"
+    cartesia_voice_id = "db6b0ed5-d5d3-463d-ae85-518a07d3c2b4"
 
     if cartesia_key and _cartesia_enabled(settings):
         try:
