@@ -61,6 +61,9 @@ function normalizeAdminSettings(row) {
     elevenlabs_api_key: row.elevenlabs_api_key ?? '',
     elevenlabs_voice_id: row.elevenlabs_voice_id ?? '21m00Tcm4TlvDq8ikWAM',
     use_elevenlabs: !!row.use_elevenlabs,
+    cartesia_api_key: row.cartesia_api_key ?? '',
+    cartesia_voice_id: row.cartesia_voice_id ?? 'db6b0ed5-d5d3-463d-ae85-518a07d3c2b4',
+    use_cartesia: !!row.use_cartesia,
   };
 }
 
@@ -80,6 +83,15 @@ function toAdminSettingsPayload(updates) {
   if (updates.use_elevenlabs !== undefined) {
     payload.use_elevenlabs = !!updates.use_elevenlabs;
   }
+  if (updates.cartesia_api_key !== undefined) {
+    payload.cartesia_api_key = updates.cartesia_api_key;
+  }
+  if (updates.cartesia_voice_id !== undefined) {
+    payload.cartesia_voice_id = updates.cartesia_voice_id;
+  }
+  if (updates.use_cartesia !== undefined) {
+    payload.use_cartesia = !!updates.use_cartesia;
+  }
   return payload;
 }
 
@@ -90,6 +102,9 @@ function formatSupabaseError(error) {
   }
   if (/elevenlabs|use_elevenlabs|schema cache|column/i.test(msg)) {
     return `${msg} — SQL Editor: supabase/add-elevenlabs-settings.sql`;
+  }
+  if (/cartesia|use_cartesia/i.test(msg)) {
+    return `${msg} — SQL Editor: supabase/add-cartesia-settings.sql`;
   }
   return msg;
 }
