@@ -1027,6 +1027,43 @@ def _elevenlabs_enabled(settings: Dict) -> bool:
     return env_on or admin_on
 
 
+def _cartesia_enabled(settings: Dict) -> bool:
+    env_on = os.environ.get("TTS_USE_CARTESIA", "false").lower() in ("1", "true", "yes", "on")
+    admin_on = settings.get("use_cartesia") in (True, "true", "t", 1, "1")
+    return env_on or admin_on
+
+
+async def synthesize_cartesia_tts(text: str, api_key: str, voice_id: str, lang: str) -> Optional[bytes]:
+    url = "https://api.cartesia.ai/tts/bytes"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Cartesia-Version": "2024-03-01",
+        "Content-Type": "application/json"
+    }
+    model_id = "sonic-multilingual" if lang == "tr" else "sonic-english"
+    payload = {
+        "model_id": model_id,
+        "transcript": text,
+        "voice": {
+            "mode": "id",
+            "id": voice_id
+        },
+        "output_format": {
+            "container": "mp3",
+            "bit_rate": 64000,
+            "sample_rate": 44100
+        }
+    }
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            r = await client.post(url, headers=headers, json=payload)
+            r.raise_for_status()
+            return r.content
+    except Exception as e:
+        logger.error(f"Cartesia HTTP error: {e}")
+        return None
+
+
 async def synthesize_speech(
     text: str, speed: float = 1.0, lang: str = "en", settings: Optional[Dict] = None
 ) -> tuple[bytes, str]:
@@ -1042,6 +1079,22 @@ async def synthesize_speech(
     voice_id = (
         (settings.get("elevenlabs_voice_id") or "").strip() or ELEVENLABS_DEFAULT_VOICE_ID
     )
+    
+    cartesia_key = (settings.get("cartesia_api_key") or "").strip() or (
+        os.environ.get("CARTESIA_API_KEY") or ""
+    ).strip()
+    cartesia_voice_id = (
+        (settings.get("cartesia_voice_id") or "").strip() or "a0e99841-438f-4a64-8222-5c2f1f0088d8"
+    )
+
+    if cartesia_key and _cartesia_enabled(settings):
+        try:
+            audio = await synthesize_cartesia_tts(spoken, cartesia_key, cartesia_voice_id, lang)
+            if audio:
+                logger.info("TTS Cartesia %s: %s", lang, spoken[:80])
+                return audio, "cartesia"
+        except Exception as e:
+            logger.warning("Cartesia TTS failed: %s", e)
 
     prefer_edge_tr = os.environ.get("TTS_PREFER_EDGE_TR", "false").lower() in (
         "1",
@@ -1340,7 +1393,7 @@ async def voice_speak(
 
     settings = (
         sb.table("admin_settings")
-        .select("speech_speed, elevenlabs_api_key, elevenlabs_voice_id, use_elevenlabs")
+        .select("speech_speed, elevenlabs_api_key, elevenlabs_voice_id, use_elevenlabs, cartesia_api_key, cartesia_voice_id, use_cartesia")
         .eq("id", "global_settings")
         .single()
         .execute()

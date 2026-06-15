@@ -1004,6 +1004,10 @@ export default function AdminDashboard() {
   const [elevenLabsVoiceId, setElevenLabsVoiceId] = useState('21m00Tcm4TlvDq8ikWAM');
   const [useElevenLabs, setUseElevenLabs] = useState(false);
 
+  const [cartesiaKeyInput, setCartesiaKeyInput] = useState('');
+  const [cartesiaVoiceId, setCartesiaVoiceId] = useState('a0e99841-438f-4a64-8222-5c2f1f0088d8');
+  const [useCartesia, setUseCartesia] = useState(false);
+
   useEffect(() => { fetchData(); }, []);
 
   useEffect(() => {
@@ -1011,7 +1015,14 @@ export default function AdminDashboard() {
     setElevenLabsVoiceId(settings.elevenlabs_voice_id || '21m00Tcm4TlvDq8ikWAM');
     setUseElevenLabs(!!settings.use_elevenlabs);
     setElevenLabsKeyInput('');
-  }, [settings?.elevenlabs_voice_id, settings?.use_elevenlabs, settings?.elevenlabs_api_key]);
+    
+    setCartesiaVoiceId(settings.cartesia_voice_id || 'a0e99841-438f-4a64-8222-5c2f1f0088d8');
+    setUseCartesia(!!settings.use_cartesia);
+    setCartesiaKeyInput('');
+  }, [
+    settings?.elevenlabs_voice_id, settings?.use_elevenlabs, settings?.elevenlabs_api_key,
+    settings?.cartesia_voice_id, settings?.use_cartesia, settings?.cartesia_api_key
+  ]);
 
   const fetchData = async () => {
     try {
@@ -1263,6 +1274,30 @@ export default function AdminDashboard() {
     await updateSettings({ elevenlabs_api_key: '', use_elevenlabs: false });
     setUseElevenLabs(false);
     setElevenLabsKeyInput('');
+  };
+
+  const saveCartesiaSettings = async (e) => {
+    e?.preventDefault?.();
+    const updates = {
+      use_cartesia: useCartesia,
+      cartesia_voice_id: cartesiaVoiceId.trim() || 'a0e99841-438f-4a64-8222-5c2f1f0088d8',
+    };
+    if (cartesiaKeyInput.trim()) {
+      updates.cartesia_api_key = cartesiaKeyInput.trim();
+    }
+    if (useCartesia && !settings?.cartesia_api_key && !cartesiaKeyInput.trim()) {
+      toast.error('Cartesia acikken API anahtari gerekli');
+      return;
+    }
+    await updateSettings(updates);
+    setCartesiaKeyInput('');
+  };
+
+  const clearCartesiaKey = async () => {
+    if (!window.confirm('Cartesia anahtarini silmek istediginize emin misiniz?')) return;
+    await updateSettings({ cartesia_api_key: '', use_cartesia: false });
+    setUseCartesia(false);
+    setCartesiaKeyInput('');
   };
 
   const openQuotaModal = (u) => {
@@ -2007,6 +2042,84 @@ export default function AdminDashboard() {
                         </Button>
                         {settings.elevenlabs_api_key && (
                           <Button type="button" variant="outline" onClick={clearElevenLabsKey}>
+                            Anahtari sil
+                          </Button>
+                        )}
+                      </div>
+                    </form>
+                  </div>
+
+                  <div className="border-t border-white/10 pt-6 space-y-4">
+                    <h3 className="text-lg font-medium text-white">Cartesia AI (Yeni Nesil Ses)</h3>
+                    <p className="text-xs text-slate-500">
+                      Aktif edildiginde tüm sesler (Turkce ve Ingilizce) Cartesia uzerinden uretilir.
+                      Turkce icin otomatik olarak sonic-multilingual modeli kullanilir.
+                    </p>
+                    <div className="flex items-center justify-between rounded-lg border border-white/10 bg-white/5 px-4 py-3">
+                      <div>
+                        <Label className="text-slate-200">Cartesia kullan</Label>
+                        <p className="text-xs text-slate-500 mt-1">
+                          {useCartesia && settings.cartesia_api_key
+                            ? 'Aktif — ogrenciler Cartesia duyar'
+                            : 'Kapali'}
+                        </p>
+                      </div>
+                      <Switch
+                        checked={useCartesia}
+                        onCheckedChange={setUseCartesia}
+                        data-testid="use-cartesia-switch"
+                      />
+                    </div>
+                    <form className="space-y-4" onSubmit={saveCartesiaSettings} autoComplete="off">
+                      <input
+                        type="text"
+                        name="username"
+                        autoComplete="username"
+                        tabIndex={-1}
+                        aria-hidden="true"
+                        className="sr-only"
+                        defaultValue="admin"
+                        readOnly
+                      />
+                      <div>
+                        <Label htmlFor="cartesia-api-key" className="text-slate-300 mb-2 block">
+                          Cartesia API anahtari
+                        </Label>
+                        <Input
+                          id="cartesia-api-key"
+                          type="password"
+                          autoComplete="new-password"
+                          value={cartesiaKeyInput}
+                          onChange={(e) => setCartesiaKeyInput(e.target.value)}
+                          placeholder={
+                            settings.cartesia_api_key
+                              ? 'Kayitli anahtar var — degistirmek icin yazin'
+                              : 'sk_...'
+                          }
+                          className="bg-white/5 border-white/10 text-white"
+                          data-testid="cartesia-api-key"
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="cartesia-voice-id" className="text-slate-300 mb-2 block">
+                          Voice ID (Ses profili)
+                        </Label>
+                        <Input
+                          id="cartesia-voice-id"
+                          value={cartesiaVoiceId}
+                          onChange={(e) => setCartesiaVoiceId(e.target.value)}
+                          placeholder="a0e99841-438f-4a64-8222-5c2f1f0088d8"
+                          className="bg-white/5 border-white/10 text-white"
+                          data-testid="cartesia-voice-id"
+                        />
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <Button type="submit" data-testid="cartesia-save">
+                          <Save className="w-4 h-4 mr-2" />
+                          Kaydet
+                        </Button>
+                        {settings.cartesia_api_key && (
+                          <Button type="button" variant="outline" onClick={clearCartesiaKey}>
                             Anahtari sil
                           </Button>
                         )}
