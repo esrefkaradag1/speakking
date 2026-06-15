@@ -1573,8 +1573,10 @@ export default function LessonSession() {
               )}
               <div className="flex justify-center mt-3">
                 <button
-                  onClick={async () => {
-                    await ensureAudioUnlocked();
+                  onClick={() => {
+                    if (voiceMode && isRecording) {
+                      stopRecording();
+                    }
                     setVoiceMode(!voiceMode);
                   }}
                   className="text-[10px] uppercase tracking-wider font-bold text-slate-500 hover:text-indigo-400 transition-colors">

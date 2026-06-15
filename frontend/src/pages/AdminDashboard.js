@@ -502,8 +502,9 @@ function DocumentsTab({ userId }) {
 }
 
 // ==================== AI CONFIG TAB ====================
-function AIConfigTab() {
+function AIConfigTab({ categories = [] }) {
   const [config, setConfig] = useState(null);
+  const [selectedCategory, setSelectedCategory] = useState("Genel");
   const [savedConfig, setSavedConfig] = useState(null);
   const [saving, setSaving] = useState(false);
   const [sentenceCount, setSentenceCount] = useState(0);
@@ -561,24 +562,44 @@ function AIConfigTab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [savedConfig?.updated_at, sentenceCount, docCount]);
 
+  const currentConfigView = useMemo(() => {
+    if (!config) return null;
+    if (selectedCategory === "Genel") return config;
+    return {
+      ...config,
+      system_prompt: config.category_overrides?.[selectedCategory]?.system_prompt || '',
+      custom_instructions: config.category_overrides?.[selectedCategory]?.custom_instructions || '',
+    };
+  }, [config, selectedCategory]);
+
+  const savedConfigView = useMemo(() => {
+    if (!savedConfig) return null;
+    if (selectedCategory === "Genel") return savedConfig;
+    return {
+      ...savedConfig,
+      system_prompt: savedConfig.category_overrides?.[selectedCategory]?.system_prompt || '',
+      custom_instructions: savedConfig.category_overrides?.[selectedCategory]?.custom_instructions || '',
+    };
+  }, [savedConfig, selectedCategory]);
+
   const hasDraft = useMemo(() => {
-    if (!config || !savedConfig) return false;
-    return JSON.stringify(config) !== JSON.stringify(savedConfig);
-  }, [config, savedConfig]);
+    if (!currentConfigView || !savedConfigView) return false;
+    return JSON.stringify(currentConfigView) !== JSON.stringify(savedConfigView);
+  }, [currentConfigView, savedConfigView]);
 
   const instructionItems = useMemo(() => {
-    if (!config || !savedConfig) return [];
-    return analyzeInstructionDiff(config, savedConfig);
-  }, [config, savedConfig]);
+    if (!currentConfigView || !savedConfigView) return [];
+    return analyzeInstructionDiff(currentConfigView, savedConfigView);
+  }, [currentConfigView, savedConfigView]);
 
   const contextBlocks = useMemo(
-    () => buildContextBlocks(savedConfig || config, { sentenceCount, docCount }),
-    [savedConfig, config, sentenceCount, docCount]
+    () => buildContextBlocks(savedConfigView || currentConfigView, { sentenceCount, docCount }),
+    [savedConfigView, currentConfigView, sentenceCount, docCount]
   );
 
   const assistantMessages = useMemo(
-    () => buildAssistantMessages(config, savedConfig, instructionItems, hasDraft),
-    [config, savedConfig, instructionItems, hasDraft]
+    () => buildAssistantMessages(currentConfigView, savedConfigView, instructionItems, hasDraft),
+    [currentConfigView, savedConfigView, instructionItems, hasDraft]
   );
 
   const appliedOnServer = serverStatus?.instructions?.filter((i) => i.applied) || [];
@@ -822,23 +843,71 @@ function AIConfigTab() {
 
       {/* Düzenleme alanları */}
       <div className="glass p-6 space-y-6">
+        <div className="flex items-center gap-4 border-b border-white/10 pb-4">
+          <Label className="text-white font-medium text-base">Müfredat Kategorisi:</Label>
+          <select
+            value={selectedCategory}
+            onChange={(e) => setSelectedCategory(e.target.value)}
+            className="bg-slate-800 border border-white/10 text-white rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
+          >
+            <option value="Genel">Genel (Varsayılan)</option>
+            {categories.map((c) => (
+              <option key={c.code} value={c.code}>{c.code} - {c.name_tr}</option>
+            ))}
+          </select>
+        </div>
+
         <div>
-          <Label className="text-slate-300 mb-2 block">Sistem talimatları (satır satır işlenir)</Label>
+          <Label className="text-slate-300 mb-2 block">
+            {selectedCategory === "Genel" ? "Sistem talimatları (satır satır işlenir)" : `${selectedCategory} için özel Sistem talimatları`}
+          </Label>
           <textarea
-            value={config.system_prompt}
-            onChange={(e) => setConfig((c) => ({ ...c, system_prompt: e.target.value }))}
+            value={selectedCategory === "Genel" ? (config.system_prompt || '') : (config.category_overrides?.[selectedCategory]?.system_prompt || '')}
+            onChange={(e) => {
+              const val = e.target.value;
+              if (selectedCategory === "Genel") {
+                setConfig((c) => ({ ...c, system_prompt: val }));
+              } else {
+                setConfig((c) => ({
+                  ...c,
+                  category_overrides: {
+                    ...(c.category_overrides || {}),
+                    [selectedCategory]: {
+                      ...((c.category_overrides || {})[selectedCategory] || {}),
+                      system_prompt: val,
+                    }
+                  }
+                }));
+              }
+            }}
             className="w-full h-28 p-3 rounded-lg bg-white/5 border border-white/10 text-white text-sm resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
             placeholder="Örn: Öğrencilere her zaman Türkçe açıklama yap."
             data-testid="system-prompt-input"
           />
         </div>
         <div>
-          <Label className="text-slate-300 mb-2 block">Öğretim notları</Label>
+          <Label className="text-slate-300 mb-2 block">
+            {selectedCategory === "Genel" ? "Öğretim notları" : `${selectedCategory} için Öğretim notları`}
+          </Label>
           <textarea
-            value={config.custom_instructions}
-            onChange={(e) =>
-              setConfig((c) => ({ ...c, custom_instructions: e.target.value }))
-            }
+            value={selectedCategory === "Genel" ? (config.custom_instructions || '') : (config.category_overrides?.[selectedCategory]?.custom_instructions || '')}
+            onChange={(e) => {
+              const val = e.target.value;
+              if (selectedCategory === "Genel") {
+                setConfig((c) => ({ ...c, custom_instructions: val }));
+              } else {
+                setConfig((c) => ({
+                  ...c,
+                  category_overrides: {
+                    ...(c.category_overrides || {}),
+                    [selectedCategory]: {
+                      ...((c.category_overrides || {})[selectedCategory] || {}),
+                      custom_instructions: val,
+                    }
+                  }
+                }));
+              }
+            }}
             className="w-full h-28 p-3 rounded-lg bg-white/5 border border-white/10 text-white text-sm resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
             placeholder="Örn: Gramer hatalarında detaylı açıklama yap."
             data-testid="custom-instructions-input"
@@ -926,6 +995,7 @@ export default function AdminDashboard() {
   const [quickAddForm, setQuickAddForm] = useState({ title: '', title_tr: '' });
   
   const [showAddUserModal, setShowAddUserModal] = useState(false);
+  const [editingUser, setEditingUser] = useState(null);
   const [addUserForm, setAddUserForm] = useState({ name: '', email: '', password: '', level: 'A1', is_admin: false, daily_limit_minutes: 30 });
   const [quotaUser, setQuotaUser] = useState(null);
   const [quotaForm, setQuotaForm] = useState({ daily_limit_minutes: 30, used_minutes_today: 0 });
@@ -1245,16 +1315,46 @@ export default function AdminDashboard() {
     }
   };
 
+  const openAddUserModal = () => {
+    setEditingUser(null);
+    setAddUserForm({ name: '', email: '', password: '', level: 'A1', is_admin: false, daily_limit_minutes: 30 });
+    setShowAddUserModal(true);
+  };
+
+  const openEditUserModal = (u) => {
+    setEditingUser(u);
+    setAddUserForm({ 
+      name: u.name || '', 
+      email: u.email || '', 
+      password: '', // Password update not supported here
+      level: u.level || 'A1', 
+      is_admin: !!u.is_admin, 
+      daily_limit_minutes: u.daily_limit_minutes || 30 
+    });
+    setShowAddUserModal(true);
+  };
+
   const handleAddUser = async (e) => {
     e.preventDefault();
     try {
-      await adminApi.createAdminUser(addUserForm);
-      toast.success('Kullanici basariyla eklendi');
+      if (editingUser) {
+        await adminApi.updateAdminUserProfile(editingUser.id, {
+          name: addUserForm.name,
+          level: addUserForm.level,
+          daily_limit_minutes: addUserForm.daily_limit_minutes,
+          is_admin: addUserForm.is_admin,
+        });
+        toast.success('Kullanici guncellendi');
+      } else {
+        await adminApi.createAdminUser(addUserForm);
+        toast.success('Kullanici basariyla eklendi');
+      }
       setShowAddUserModal(false);
+      setEditingUser(null);
       setAddUserForm({ name: '', email: '', password: '', level: 'A1', is_admin: false, daily_limit_minutes: 30 });
       fetchData(); // refresh user list
     } catch (err) { 
-      toast.error(err.response?.data?.detail || 'Kullanici eklenemedi'); 
+      toast.error(err?.message || err.response?.data?.detail || 'Islem basarisiz'); 
     }
   };
 
@@ -1692,7 +1792,7 @@ export default function AdminDashboard() {
 
           {/* AI Config Tab */}
           <TabsContent value="ai-config">
-            <AIConfigTab />
+            <AIConfigTab categories={categories} />
           </TabsContent>
 
           {/* Users Tab */}
@@ -1700,7 +1800,7 @@ export default function AdminDashboard() {
             <div className="glass p-6">
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-xl font-heading font-medium text-white">Kullanicilar</h2>
-                <Button onClick={() => setShowAddUserModal(true)} className="bg-indigo-600 hover:bg-indigo-500" data-testid="add-user-btn">
+                <Button onClick={openAddUserModal} className="bg-indigo-600 hover:bg-indigo-500" data-testid="add-user-btn">
                   <Plus className="w-4 h-4 mr-2" />Kullanici Ekle
                 </Button>
               </div>
@@ -1765,6 +1865,17 @@ export default function AdminDashboard() {
                             >
                               <Clock className="w-3.5 h-3.5 mr-1" />
                               Kota
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              className="h-8 text-blue-400 hover:text-blue-300"
+                              onClick={() => openEditUserModal(u)}
+                              data-testid={`user-edit-${u.id}`}
+                            >
+                              <Settings className="w-3.5 h-3.5 mr-1" />
+                              Duzenle
                             </Button>
                           </div>
                         </td>
@@ -2192,8 +2303,8 @@ export default function AdminDashboard() {
       <Dialog open={showAddUserModal} onOpenChange={setShowAddUserModal}>
         <DialogContent className="glass border-white/10 max-w-md">
           <DialogHeader>
-            <DialogTitle className="text-xl font-heading text-white">Yeni Kullanici Ekle</DialogTitle>
-            <DialogDescription className="text-slate-400">Sisteme yeni bir ogrenci veya yonetici ekleyin</DialogDescription>
+            <DialogTitle className="text-xl font-heading text-white">{editingUser ? 'Kullanici Duzenle' : 'Yeni Kullanici Ekle'}</DialogTitle>
+            <DialogDescription className="text-slate-400">{editingUser ? 'Kullanici bilgilerini guncelleyin' : 'Sisteme yeni bir ogrenci veya yonetici ekleyin'}</DialogDescription>
           </DialogHeader>
           <form onSubmit={handleAddUser} className="space-y-4 mt-4">
             <div>
@@ -2204,13 +2315,15 @@ export default function AdminDashboard() {
             <div>
               <Label className="text-slate-300">E-posta</Label>
               <Input type="email" value={addUserForm.email} onChange={e => setAddUserForm(f => ({...f, email: e.target.value}))}
-                className="bg-white/5 border-white/10 text-white mt-1" required placeholder="Orn: ahmet@ornek.com" />
+                className="bg-white/5 border-white/10 text-white mt-1" required disabled={!!editingUser} placeholder="Orn: ahmet@ornek.com" />
             </div>
-            <div>
-              <Label className="text-slate-300">Sifre</Label>
-              <Input type="password" value={addUserForm.password} onChange={e => setAddUserForm(f => ({...f, password: e.target.value}))}
-                className="bg-white/5 border-white/10 text-white mt-1" required placeholder="En az 6 karakter" />
-            </div>
+            {!editingUser && (
+              <div>
+                <Label className="text-slate-300">Sifre</Label>
+                <Input type="password" value={addUserForm.password} onChange={e => setAddUserForm(f => ({...f, password: e.target.value}))}
+                  className="bg-white/5 border-white/10 text-white mt-1" required placeholder="En az 6 karakter" />
+              </div>
+            )}
             <div className="flex gap-3">
               <div className="flex-1">
                 <Label className="text-slate-300">Seviye</Label>

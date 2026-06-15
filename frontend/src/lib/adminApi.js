@@ -172,6 +172,8 @@ export async function updateAdminUserProfile(userId, updates) {
     payload.used_minutes_today = Math.max(0, Number(updates.used_minutes_today));
   }
   if (updates.level !== undefined) payload.level = updates.level;
+  if (updates.name !== undefined) payload.name = updates.name;
+  if (updates.is_admin !== undefined) payload.is_admin = !!updates.is_admin;
   if (Object.keys(payload).length === 0) return null;
 
   const { data, error } = await supabase

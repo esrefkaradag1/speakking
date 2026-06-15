@@ -225,6 +225,7 @@ class AIConfigUpdate(BaseModel):
     use_sentence_bank: Optional[bool] = None
     use_documents: Optional[bool] = None
     max_sentences_per_lesson: Optional[int] = None
+    category_overrides: Optional[Dict[str, Dict[str, str]]] = None
 
 # ==================== BADGE DEFINITIONS ====================
 
@@ -1737,7 +1738,8 @@ async def get_ai_config(user: Dict = Depends(get_admin_user)):
             "custom_instructions": "",
             "use_sentence_bank": True,
             "use_documents": True,
-            "max_sentences_per_lesson": 10
+            "max_sentences_per_lesson": 10,
+            "category_overrides": {}
         }
         await db.ai_config.insert_one(config)
         config.pop("_id", None)
@@ -1761,7 +1763,7 @@ async def build_training_prompt(session_level: str, scenario: dict, tone: str, u
     ai_config = await db.ai_config.find_one({"id": "ai_training_config"}, {"_id": 0})
     if not ai_config:
         ai_config = {"system_prompt": "", "custom_instructions": "", "use_sentence_bank": True,
-                      "use_documents": True, "max_sentences_per_lesson": 10}
+                      "use_documents": True, "max_sentences_per_lesson": 10, "category_overrides": {}}
 
     # Base prompt
     base = f"""You are a close, fun, and extremely friendly language companion (like a kanka or close buddy chatting on WhatsApp, using very casual and warm language) helping a Turkish speaker practice English translation.
@@ -1814,12 +1816,17 @@ Hız kesmeden devam edelim, sence şu cümle nasıl çevrilir? **'Yarın hava g�
 [VOCABULARY]{{"word":"tomorrow","meaning":"yarin","example":"I will go shopping tomorrow."}}[/VOCABULARY]
 """
 
-    # Append custom system prompt from admin
-    if ai_config.get("system_prompt"):
-        base += f"\n\nADDITIONAL INSTRUCTIONS FROM ADMIN:\n{ai_config['system_prompt']}\n"
+    # Get category overrides if any
+    cat_overrides = ai_config.get("category_overrides", {}).get(session_level, {})
+    sys_prompt = cat_overrides.get("system_prompt") if "system_prompt" in cat_overrides and cat_overrides["system_prompt"].strip() else ai_config.get("system_prompt")
+    cust_inst = cat_overrides.get("custom_instructions") if "custom_instructions" in cat_overrides and cat_overrides["custom_instructions"].strip() else ai_config.get("custom_instructions")
 
-    if ai_config.get("custom_instructions"):
-        base += f"\nCUSTOM TEACHING NOTES:\n{ai_config['custom_instructions']}\n"
+    # Append custom system prompt from admin
+    if sys_prompt:
+        base += f"\n\nADDITIONAL INSTRUCTIONS FROM ADMIN:\n{sys_prompt}\n"
+
+    if cust_inst:
+        base += f"\nCUSTOM TEACHING NOTES:\n{cust_inst}\n"
 
     # Append sentence bank examples
     if ai_config.get("use_sentence_bank", True):
