@@ -81,6 +81,7 @@ function SentenceBankTab() {
   const [bulkLevel, setBulkLevel] = useState('A1');
   const [loading, setLoading] = useState(false);
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { fetchSentences(); }, [filterLevel]);
 
   const fetchSentences = async () => {
@@ -307,7 +308,8 @@ function DocumentsTab({ userId }) {
   const [extracting, setExtracting] = useState(false);
   const fileInputRef = useRef(null);
 
-  useEffect(() => { fetchDocuments(); }, []);
+  useEffect(() => { fetchDocuments(); // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const fetchDocuments = async () => {
     try {
@@ -517,6 +519,7 @@ function AIConfigTab({ categories = [] }) {
   useEffect(() => {
     fetchConfig();
     fetchCounts();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const fetchConfig = async () => {
@@ -1008,7 +1011,8 @@ export default function AdminDashboard() {
   const [cartesiaVoiceId, setCartesiaVoiceId] = useState('db6b0ed5-d5d3-463d-ae85-518a07d3c2b4');
   const [useCartesia, setUseCartesia] = useState(false);
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchData(); // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (!settings) return;
@@ -1020,6 +1024,7 @@ export default function AdminDashboard() {
     setUseCartesia(!!settings.use_cartesia);
     setCartesiaKeyInput('');
   }, [
+    settings,
     settings?.elevenlabs_voice_id, settings?.use_elevenlabs, settings?.elevenlabs_api_key,
     settings?.cartesia_voice_id, settings?.use_cartesia, settings?.cartesia_api_key
   ]);

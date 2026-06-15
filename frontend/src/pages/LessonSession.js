@@ -875,6 +875,7 @@ export default function LessonSession() {
       });
     }, 1000);
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Auto-scroll

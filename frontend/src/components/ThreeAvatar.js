@@ -247,6 +247,7 @@ export default function ThreeAvatar({ active, audioRef, isTalking, className = '
         cancelAnimationFrame(requestRef.current);
       }
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isReady]);
 
   if (!active) return null;

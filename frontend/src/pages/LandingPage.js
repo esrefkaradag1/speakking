@@ -78,6 +78,7 @@ export default function LandingPage() {
 
   useEffect(() => {
     fetchCurriculum();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const fetchCurriculum = async () => {
