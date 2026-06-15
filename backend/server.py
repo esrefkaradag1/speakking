@@ -643,7 +643,7 @@ async def delete_scenario(scenario_id: str):
 @api_router.post("/lessons/start")
 async def start_lesson(scenario_id: str, user: Dict = Depends(get_current_user)):
     # Check if user has remaining time
-    if user["used_minutes_today"] >= user["daily_limit_minutes"]:
+    if user.get("used_minutes_today", 0) >= user.get("daily_limit_minutes", 30) and not user.get("is_admin", False):
         raise HTTPException(status_code=403, detail="Daily limit reached")
     
     # Get scenario
@@ -939,7 +939,7 @@ async def get_translation_hint(request: HintRequest, user: Dict = Depends(get_cu
 async def chat_with_ai(chat_data: ChatMessage, user: Dict = Depends(get_current_user)):
     try:
         # Check remaining time
-        if user.get("used_minutes_today", 0) >= user.get("daily_limit_minutes", 30):
+        if user.get("used_minutes_today", 0) >= user.get("daily_limit_minutes", 30) and not user.get("is_admin", False):
             raise HTTPException(status_code=403, detail="Daily limit reached")
         
         # Get session
@@ -1379,7 +1379,7 @@ async def voice_chat(
     """Complete voice chat: transcribe -> AI response -> TTS"""
     try:
         # Check remaining time
-        if user["used_minutes_today"] >= user["daily_limit_minutes"]:
+        if user.get("used_minutes_today", 0) >= user.get("daily_limit_minutes", 30) and not user.get("is_admin", False):
             raise HTTPException(status_code=403, detail="Daily limit reached")
         
         # 1. Decode and transcribe audio
