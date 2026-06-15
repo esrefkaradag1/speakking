@@ -100,18 +100,25 @@ export default function ThreeAvatar({ active, audioRef, isTalking, className = '
     };
   }, [active, audioRef]);
 
-  // Render loop to sync audio volume to jawOpen blendshape
+  // Render loop: drive lip sync through TalkingHead's own mtAvatar.realtime API
   useEffect(() => {
     if (!isReady || !headRef.current) return;
 
     const head = headRef.current;
     
-    // Common speech visemes for RPM / TalkingHead
+    // The viseme blendshapes used for speech animation
     const speechVisemes = ['viseme_aa', 'viseme_E', 'viseme_I', 'viseme_O', 'viseme_U'];
+    // Fallback targets if no viseme_* blendshapes exist
+    const fallbackTargets = ['jawOpen', 'mouthOpen'];
+
+    // Determine which blendshapes are available in the avatar
+    const availableVisemes = speechVisemes.filter(v => head.mtAvatar && head.mtAvatar[v]);
+    const availableFallbacks = fallbackTargets.filter(v => head.mtAvatar && head.mtAvatar[v]);
     
-    // Check if the avatar has jawOpen or mouthOpen as fallback
-    let fallbackBlendshape = null;
-    // We must wait until head.mtAvatar is populated by TalkingHead
+    console.log('[LipSync] Available visemes:', availableVisemes);
+    console.log('[LipSync] Available fallbacks:', availableFallbacks);
+    console.log('[LipSync] mtAvatar keys (sample):', head.mtAvatar ? Object.keys(head.mtAvatar).slice(0, 20) : 'N/A');
+
     const loop = () => {
       // Lazy init AudioContext if missing
       if (!analyserRef.current && audioRef?.current) {
@@ -128,117 +135,80 @@ export default function ThreeAvatar({ active, audioRef, isTalking, className = '
           }
           analyserRef.current = audioRef.current._analyserNode;
         } catch (e) {
-          console.warn("AudioContext init failed:", e);
+          // ignore
         }
       }
 
-      // We only need to calculate the volume once per frame here.
-      // We will inject the actual mesh manipulation into head.renderer.render
-      if (head) {
-        let currentVolume = 0;
+      if (!head || !head.mtAvatar) {
+        requestRef.current = requestAnimationFrame(loop);
+        return;
+      }
 
-        if (audioRef.current && !audioRef.current.paused && isTalking) {
-          if (analyserRef.current) {
-            const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
-            analyserRef.current.getByteFrequencyData(dataArray);
+      // Calculate audio volume
+      let volume = 0;
+      const audioPlaying = audioRef?.current && !audioRef.current.paused && isTalking;
 
-            let sum = 0;
-            for(let i=0; i<dataArray.length; i++) {
-               sum += dataArray[i];
-            }
-            currentVolume = sum / dataArray.length;
-          }
-
-          // If Web Audio API fails (e.g. Safari restrictions) or returns 0, simulate smooth lip movement
-          if (currentVolume === 0) {
-            const t = Date.now() / 1000;
-            const envelope = (Math.sin(t * 3) + 1) / 2;
-            const jaw = (Math.sin(t * 20) + 1) / 2;
-            currentVolume = jaw * envelope * 20 + 5; 
-          }
+      if (audioPlaying && analyserRef.current) {
+        const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
+        analyserRef.current.getByteFrequencyData(dataArray);
+        let sum = 0;
+        for (let i = 0; i < dataArray.length; i++) {
+          sum += dataArray[i];
         }
+        volume = sum / dataArray.length;
+      }
 
-        // Store globally for the render hijacker
-        window.__threeAvatarIntensity = Math.min(currentVolume / 20, 1.0);
+      // If Web Audio API fails but we're talking, simulate movement
+      if (audioPlaying && volume === 0) {
+        const t = Date.now() / 1000;
+        const envelope = (Math.sin(t * 3) + 1) / 2;
+        const jaw = (Math.sin(t * 20) + 1) / 2;
+        volume = jaw * envelope * 20 + 5;
+      }
+
+      const intensity = Math.min(volume / 20, 1.0);
+
+      // USE TALKINGHEAD'S NATIVE API: set .realtime + .needsUpdate on mtAvatar entries
+      // This is the ONLY correct way - TalkingHead processes these in updateMorphTargets()
+      // The priority order is: fixed > realtime > system > animation > baseline
+      // By setting .realtime, we override animations without fighting the engine
+
+      if (audioPlaying && intensity > 0.02) {
+        const time = Date.now();
+        const visemeIndex = Math.floor(time / 120) % availableVisemes.length;
+
+        if (availableVisemes.length > 0) {
+          // Set viseme blendshapes through TalkingHead's realtime API
+          availableVisemes.forEach((v, idx) => {
+            const mt = head.mtAvatar[v];
+            if (mt) {
+              mt.realtime = (idx === visemeIndex) ? intensity : intensity * 0.1;
+              mt.needsUpdate = true;
+            }
+          });
+        } else if (availableFallbacks.length > 0) {
+          // Use jawOpen/mouthOpen as fallback
+          availableFallbacks.forEach(fb => {
+            const mt = head.mtAvatar[fb];
+            if (mt) {
+              mt.realtime = intensity;
+              mt.needsUpdate = true;
+            }
+          });
+        }
+      } else {
+        // Not talking: clear realtime values so TalkingHead returns to baseline
+        [...availableVisemes, ...availableFallbacks].forEach(v => {
+          const mt = head.mtAvatar?.[v];
+          if (mt && mt.realtime !== null) {
+            mt.realtime = null;
+            mt.needsUpdate = true;
+          }
+        });
       }
       
       requestRef.current = requestAnimationFrame(loop);
     };
-
-    // Hijack the renderer to apply blendshapes right before WebGL draw
-    // This perfectly bypasses TalkingHead's internal state overwrites
-    if (head && head.renderer && !head.renderer.__hijackedForLipSync) {
-      const originalRender = head.renderer.render;
-      head.renderer.__hijackedForLipSync = true;
-      
-      head.renderer.render = function(scene, camera) {
-        const intensity = window.__threeAvatarIntensity || 0;
-        
-        // Find meshes
-        const meshes = [];
-        const rootNode = head.scene || head.armature || head.avatarNode || head.ikMesh;
-        if (rootNode) {
-          rootNode.traverse((node) => {
-            if (node.isMesh && node.morphTargetDictionary && node.morphTargetInfluences) {
-              meshes.push(node);
-            }
-          });
-        }
-
-        // Apply morph targets directly
-        meshes.forEach((mesh) => {
-          let visemeFound = false;
-          
-          if (intensity > 0.05) {
-            const time = Date.now();
-            const visemeIndex = Math.floor(time / 150) % speechVisemes.length;
-            
-            speechVisemes.forEach((v, idx) => {
-              const targetIdx = mesh.morphTargetDictionary[v];
-              if (targetIdx !== undefined) {
-                visemeFound = true;
-                const targetVal = idx === visemeIndex ? intensity : 0;
-                const currentVal = mesh.morphTargetInfluences[targetIdx];
-                mesh.morphTargetInfluences[targetIdx] = currentVal + (targetVal - currentVal) * 0.5;
-              }
-            });
-
-            if (!visemeFound) {
-              const fb = mesh.morphTargetDictionary['jawOpen'] !== undefined ? 'jawOpen' : 
-                        (mesh.morphTargetDictionary['mouthOpen'] !== undefined ? 'mouthOpen' : 'viseme_O');
-              const targetIdx = mesh.morphTargetDictionary[fb];
-              if (targetIdx !== undefined) {
-                const currentVal = mesh.morphTargetInfluences[targetIdx];
-                mesh.morphTargetInfluences[targetIdx] = currentVal + (intensity - currentVal) * 0.5;
-              }
-            }
-          } else {
-            // Fade out
-            speechVisemes.forEach((v) => {
-              const targetIdx = mesh.morphTargetDictionary[v];
-              if (targetIdx !== undefined) {
-                const currentVal = mesh.morphTargetInfluences[targetIdx];
-                mesh.morphTargetInfluences[targetIdx] = currentVal > 0.05 ? currentVal * 0.5 : 0;
-              }
-            });
-            const fb = mesh.morphTargetDictionary['jawOpen'] !== undefined ? 'jawOpen' : 
-                      (mesh.morphTargetDictionary['mouthOpen'] !== undefined ? 'mouthOpen' : 'viseme_O');
-            const targetIdx = mesh.morphTargetDictionary[fb];
-            if (targetIdx !== undefined) {
-              const currentVal = mesh.morphTargetInfluences[targetIdx];
-              mesh.morphTargetInfluences[targetIdx] = currentVal > 0.05 ? currentVal * 0.5 : 0;
-            }
-          }
-        });
-
-        // Call original renderer
-        originalRender.call(this, scene, camera);
-      };
-    }
-
-
-
-
 
     requestRef.current = requestAnimationFrame(loop);
 
@@ -246,6 +216,14 @@ export default function ThreeAvatar({ active, audioRef, isTalking, className = '
       if (requestRef.current) {
         cancelAnimationFrame(requestRef.current);
       }
+      // Clean up: clear all realtime values
+      [...speechVisemes, ...fallbackTargets].forEach(v => {
+        const mt = head?.mtAvatar?.[v];
+        if (mt) {
+          mt.realtime = null;
+          mt.needsUpdate = true;
+        }
+      });
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isReady]);
