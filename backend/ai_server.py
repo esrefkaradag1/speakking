@@ -1084,7 +1084,7 @@ async def synthesize_speech(
         os.environ.get("CARTESIA_API_KEY") or ""
     ).strip()
     cartesia_voice_id = (
-        (settings.get("cartesia_voice_id") or "").strip() or "a0e99841-438f-4a64-8222-5c2f1f0088d8"
+        (settings.get("cartesia_voice_id") or "").strip() or "db6b0ed5-d5d3-463d-ae85-518a07d3c2b4"
     )
 
     if cartesia_key and _cartesia_enabled(settings):

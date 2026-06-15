@@ -1005,7 +1005,7 @@ export default function AdminDashboard() {
   const [useElevenLabs, setUseElevenLabs] = useState(false);
 
   const [cartesiaKeyInput, setCartesiaKeyInput] = useState('');
-  const [cartesiaVoiceId, setCartesiaVoiceId] = useState('a0e99841-438f-4a64-8222-5c2f1f0088d8');
+  const [cartesiaVoiceId, setCartesiaVoiceId] = useState('db6b0ed5-d5d3-463d-ae85-518a07d3c2b4');
   const [useCartesia, setUseCartesia] = useState(false);
 
   useEffect(() => { fetchData(); }, []);
@@ -1016,7 +1016,7 @@ export default function AdminDashboard() {
     setUseElevenLabs(!!settings.use_elevenlabs);
     setElevenLabsKeyInput('');
     
-    setCartesiaVoiceId(settings.cartesia_voice_id || 'a0e99841-438f-4a64-8222-5c2f1f0088d8');
+    setCartesiaVoiceId(settings.cartesia_voice_id || 'db6b0ed5-d5d3-463d-ae85-518a07d3c2b4');
     setUseCartesia(!!settings.use_cartesia);
     setCartesiaKeyInput('');
   }, [
@@ -1280,7 +1280,7 @@ export default function AdminDashboard() {
     e?.preventDefault?.();
     const updates = {
       use_cartesia: useCartesia,
-      cartesia_voice_id: cartesiaVoiceId.trim() || 'a0e99841-438f-4a64-8222-5c2f1f0088d8',
+      cartesia_voice_id: cartesiaVoiceId.trim() || 'db6b0ed5-d5d3-463d-ae85-518a07d3c2b4',
     };
     if (cartesiaKeyInput.trim()) {
       updates.cartesia_api_key = cartesiaKeyInput.trim();
@@ -2108,7 +2108,7 @@ export default function AdminDashboard() {
                           id="cartesia-voice-id"
                           value={cartesiaVoiceId}
                           onChange={(e) => setCartesiaVoiceId(e.target.value)}
-                          placeholder="a0e99841-438f-4a64-8222-5c2f1f0088d8"
+                          placeholder="db6b0ed5-d5d3-463d-ae85-518a07d3c2b4"
                           className="bg-white/5 border-white/10 text-white"
                           data-testid="cartesia-voice-id"
                         />
