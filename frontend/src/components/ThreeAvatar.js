@@ -118,7 +118,7 @@ export default function ThreeAvatar({ active, audioRef, isTalking, className = '
     }
 
     const loop = () => {
-      if (analyserRef.current && head.avatar) {
+      if (analyserRef.current && head.scene) {
         let volume = 0;
 
         if (audioRef.current && !audioRef.current.paused && isTalking) {
