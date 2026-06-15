@@ -109,16 +109,11 @@ export default function ThreeAvatar({ active, audioRef, isTalking, className = '
     // Common speech visemes for RPM / TalkingHead
     const speechVisemes = ['viseme_aa', 'viseme_E', 'viseme_I', 'viseme_O', 'viseme_U'];
     
-    // Check if the avatar has jawOpen or mouthOpen as fallback
+    // We will dynamically find a fallback blendshape from the meshes array
     let fallbackBlendshape = null;
-    if (head.mtAvatar && head.mtAvatar['jawOpen']) {
-      fallbackBlendshape = 'jawOpen';
-    } else if (head.mtAvatar && head.mtAvatar['mouthOpen']) {
-      fallbackBlendshape = 'mouthOpen';
-    }
 
     const loop = () => {
-      if (analyserRef.current && head.scene) {
+      if (analyserRef.current && head) {
         let volume = 0;
 
         if (audioRef.current && !audioRef.current.paused && isTalking) {
@@ -145,10 +140,16 @@ export default function ThreeAvatar({ active, audioRef, isTalking, className = '
         
         // Find meshes with morph targets
         const meshes = [];
-        if (head.scene) {
-          head.scene.traverse((node) => {
+        const rootNode = head.scene || head.armature || head.avatarNode || head.ikMesh;
+        if (rootNode) {
+          rootNode.traverse((node) => {
             if (node.isMesh && node.morphTargetDictionary && node.morphTargetInfluences) {
               meshes.push(node);
+              if (!fallbackBlendshape) {
+                if (node.morphTargetDictionary['jawOpen'] !== undefined) fallbackBlendshape = 'jawOpen';
+                else if (node.morphTargetDictionary['mouthOpen'] !== undefined) fallbackBlendshape = 'mouthOpen';
+                else if (node.morphTargetDictionary['viseme_O'] !== undefined) fallbackBlendshape = 'viseme_O';
+              }
             }
           });
         }
