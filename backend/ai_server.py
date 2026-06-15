@@ -1036,10 +1036,10 @@ async def synthesize_cartesia_tts(text: str, api_key: str, voice_id: str, lang: 
     url = "https://api.cartesia.ai/tts/bytes"
     headers = {
         "Authorization": f"Bearer {api_key}",
-        "Cartesia-Version": "2024-03-01",
+        "Cartesia-Version": "2024-06-10",
         "Content-Type": "application/json"
     }
-    model_id = "sonic-multilingual" if lang == "tr" else "sonic-english"
+    model_id = "sonic-3.5"
     payload = {
         "model_id": model_id,
         "transcript": text,
@@ -1058,8 +1058,11 @@ async def synthesize_cartesia_tts(text: str, api_key: str, voice_id: str, lang: 
             r = await client.post(url, headers=headers, json=payload)
             r.raise_for_status()
             return r.content
+    except httpx.HTTPStatusError as e:
+        logger.error("Cartesia HTTP error: %s - Body: %s", e, r.text)
+        return None
     except Exception as e:
-        logger.error(f"Cartesia HTTP error: {e}")
+        logger.error("Cartesia general error: %s", e)
         return None
 
 
