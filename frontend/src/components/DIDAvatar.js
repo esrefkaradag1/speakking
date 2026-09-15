@@ -130,11 +130,17 @@ const DIDAvatar = forwardRef(
             <Loader2 className="w-8 h-8 animate-spin mb-2" />
             <p className="text-sm">
               {status === 'connecting'
-                ? 'Dudak senkronu baglaniyor...'
+                ? 'Gercek ogretmen baglaniyor...'
                 : status === 'error'
                   ? 'Avatar kullanilamiyor — sesli mod aktif'
-                  : 'Avatar hazirlaniyor...'}
+                  : 'Ogretmen hazirlaniyor...'}
             </p>
+          </div>
+        )}
+        {status === 'connected' && (
+          <div className="absolute top-4 right-4 flex items-center gap-2 px-3 py-1 bg-black/30 rounded-full backdrop-blur-sm pointer-events-none text-white/80 text-xs">
+            <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+            <span>Canli Ogretmen Hazir</span>
           </div>
         )}
       </div>

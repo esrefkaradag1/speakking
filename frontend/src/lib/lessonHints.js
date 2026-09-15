@@ -1,10 +1,10 @@
-/** Ipucu modulu: yalnizca ogrenciye sorulan Turkce cumleyi sec (geri bildirim cumlelerini atla). */
+/** Cevap beklenmeden once seslendirilecek TTS parcalari. */
 
 const FEEDBACK_MARKERS =
   /doğru|dogru|yanlış|yanlis|hata|teşekkür|tesekkur|güzel|guzel|harika|tebrik|yapmalı|yapmaliydin|olmalı|demek|anlamına|çevirisi|cevirisi|ingilizcesi\s+nedir|yapay zeka|sesinizi algılayam|yazarak iletin/i;
 
 function isChallengeBlock(text) {
-  return /çevir|sıradaki|şimdi|tekrar|cumle|cümle|how do you say/i.test(text);
+  return /çevir|sıradaki|şimdi|tekrar|cumle|cümle|how do you say|dinleyelim/i.test(text);
 }
 
 function extractQuotedTurkish(text) {
@@ -23,7 +23,6 @@ function extractQuotedTurkish(text) {
   return out;
 }
 
-/** "Sıradaki cümle:" satirindan sonraki Turkce soru cumlesi */
 function extractSiradakiChallenge(text) {
   const quoted = text.match(
     /s[ıi]radaki\s+c[üu]mle\s*:?\s*(?:\r?\n\s*)+"([^"]{4,240})"/i,
@@ -56,11 +55,6 @@ function pickChallengeFromBlock(block) {
   return null;
 }
 
-/**
- * AI yanitindan ipucu icin Turkce soru cumlesini cikar.
- * Geri bildirimdeki alinti cumleleri (or. "Bu soru dogru ama...") atlanir.
- * Birden fazla soru varsa en son (sıradaki) cumle secilir.
- */
 export function extractChallengeTurkishSentence(text) {
   if (!text?.trim()) return null;
 
@@ -102,53 +96,67 @@ function normSentence(s) {
     .toLocaleLowerCase('tr');
 }
 
-/** Cevap beklenen Turkce soru cumlesinden onceki TTS parcalari (cümle okunmaz). */
+/**
+ * Tum talimat + soru + Ingilizce model cumleleri seslendirilir.
+ * Eksik kalan tirnakli TR soru veya "dinleyelim" sonrasi EN eklenir.
+ */
+export function segmentsForTtsPlayback(fullText, segments, { hasCorrections = false } = {}) {
+  const cleaned = (segments || []).filter((seg) => seg?.text?.trim());
+  if (!cleaned.length && !fullText?.trim()) return [];
+
+  const out = [...cleaned];
+  const joined = out.map((s) => s.text).join('\n');
+
+  // "Su cumleyi cevir" sonrasi tirnakli TR soru TTS'de yoksa ekle
+  const challenge = extractChallengeTurkishSentence(fullText || '');
+  if (challenge) {
+    const norm = normSentence(challenge);
+    const already = out.some((s) => normSentence(s.text).includes(norm) || norm.includes(normSentence(s.text)));
+    if (!already) {
+      // Cevir talimatindan sonra ekle
+      const insertAt = Math.max(
+        0,
+        out.findIndex((s) => /çevir|cevir|sıradaki|siradaki/i.test(s.text))
+      );
+      const idx = insertAt >= 0 ? insertAt + 1 : out.length;
+      out.splice(idx, 0, { lang: 'tr', text: challenge });
+    }
+  }
+
+  // "Dogrusunu dinleyelim" var ama sonraki EN segment yoksa fullText'ten cikar
+  if (/dinleyelim/i.test(fullText || '') || /dinleyelim/i.test(joined)) {
+    const hasEn = out.some((s) => s.lang === 'en' && s.text.trim().split(/\s+/).length >= 3);
+    if (!hasEn) {
+      const sayEn = [...(fullText || '').matchAll(/\[SAY_EN\]([\s\S]*?)\[\/SAY_EN\]/gi)];
+      for (const m of sayEn) {
+        const en = m[1].trim().replace(/^["']|["']$/g, '');
+        if (en.split(/\s+/).length >= 2) {
+          out.push({ lang: 'en', text: en });
+        }
+      }
+      if (!out.some((s) => s.lang === 'en')) {
+        // Duz metinden Ingilizce satir
+        for (const line of (fullText || '').split('\n')) {
+          const t = line.trim().replace(/^["']|["']$/g, '');
+          if (
+            t.length > 8 &&
+            !/[çğıöşüÇĞİÖŞÜ]/.test(t) &&
+            (t.match(/[A-Za-z']+/g) || []).length >= 3 &&
+            !/dinleyelim|sıradaki|çevir/i.test(t)
+          ) {
+            out.push({ lang: 'en', text: t });
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  void hasCorrections;
+  return out.filter((seg) => seg?.text?.trim());
+}
+
+/** @deprecated */
 export function segmentsBeforeUserAnswer(fullText, segments) {
-  if (!segments?.length) return [];
-
-  let challenge = extractChallengeTurkishSentence(fullText);
-  if (!challenge && /s[ıi]radaki|çevir/i.test(fullText || '')) {
-    const trOnly = segments.filter((s) => s.lang === 'tr');
-    for (let i = trOnly.length - 1; i >= 0; i--) {
-      const t = trOnly[i].text;
-      if (
-        /s[ıi]radaki|çevir/i.test(t) ||
-        t.endsWith(':') ||
-        t.length < 8 ||
-        !/[ıİğĞüÜşŞöÖçÇ]/.test(t)
-      ) {
-        continue;
-      }
-      challenge = t;
-      break;
-    }
-  }
-
-  if (!challenge) return segments;
-
-  const cNorm = normSentence(challenge);
-  const out = [];
-  for (const seg of segments) {
-    const sNorm = normSentence(seg.text);
-
-    if (seg.lang === 'en') {
-      const wordCount = seg.text.trim().split(/\s+/).filter(Boolean).length;
-      if (wordCount >= 4 || seg.text.length > 24) {
-        continue;
-      }
-    }
-
-    const isInstruction =
-      (/çevir|sıradaki|siradaki/i.test(seg.text) || seg.text.endsWith(':')) &&
-      sNorm !== cNorm;
-
-    if (seg.lang === 'tr' && !isInstruction && sNorm === cNorm) {
-      break;
-    }
-    if (seg.lang === 'tr' && !isInstruction && cNorm.length > 6 && sNorm.includes(cNorm)) {
-      break;
-    }
-    out.push(seg);
-  }
-  return out.length ? out : segments.slice(0, -1);
+  return segmentsForTtsPlayback(fullText, segments, { hasCorrections: false });
 }

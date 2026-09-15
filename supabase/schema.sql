@@ -130,7 +130,7 @@ security definer
 set search_path = public
 as $$
 declare
-  today date := (now() at time zone 'utc')::date;
+  today date := (now() at time zone 'Europe/Istanbul')::date;
 begin
   update public.profiles
   set used_minutes_today = 0, last_usage_reset = today

@@ -7,7 +7,30 @@ import React, {
 } from 'react';
 import { TalkingHead } from '@met4citizen/talkinghead';
 
-const AVATAR_URL = '/julia.glb';
+const AVATAR_URL_CANDIDATES = [
+  process.env.REACT_APP_AVATAR_GLB_URL,
+  'https://cdn.jsdelivr.net/gh/met4citizen/TalkingHead@1.7/avatars/brunette.glb',
+  '/avatars/brunette.glb',
+].filter(Boolean);
+
+async function loadAvatarModel(head) {
+  let lastError = null;
+  for (const url of AVATAR_URL_CANDIDATES) {
+    try {
+      await head.showAvatar({
+        url,
+        body: 'F',
+        avatarMood: 'neutral',
+        lipsyncLang: 'en',
+      });
+      return url;
+    } catch (err) {
+      lastError = err;
+      console.warn('Avatar model yuklenemedi:', url, err);
+    }
+  }
+  throw lastError || new Error('3D avatar modeli yuklenemedi');
+}
 // Dar/agiz acan visemeler — sadece konusmaya uygun olanlar
 const LIP_VISEMES = ['viseme_PP', 'viseme_FF', 'viseme_E', 'viseme_I', 'viseme_aa'];
 
@@ -83,12 +106,7 @@ async function ensureSharedHead(container) {
         lipsyncModules: [],
       });
 
-      await head.showAvatar({
-        url: AVATAR_URL,
-        body: 'F',
-        avatarMood: 'neutral',
-        lipsyncLang: 'en',
-      });
+      await loadAvatarModel(head);
       head.start();
       sharedHead = head;
       sharedContainer = container;
@@ -260,10 +278,11 @@ function waitForSpeechEnd(head, { isCancelled, onSpeakStart, timeoutMs = 120000 
 }
 
 const ThreeAvatar = forwardRef(
-  ({ active, audioRef, isTalking, onReady, className = '' }, ref) => {
+  ({ active, audioRef, isTalking, onReady, onFailed, className = '' }, ref) => {
     const containerRef = useRef(null);
     const headRef = useRef(null);
     const onReadyRef = useRef(onReady);
+    const onFailedRef = useRef(onFailed);
     const isReadyRef = useRef(false);
     const isTalkingRef = useRef(isTalking);
     const audioRefProp = useRef(audioRef);
@@ -272,6 +291,10 @@ const ThreeAvatar = forwardRef(
     useEffect(() => {
       onReadyRef.current = onReady;
     }, [onReady]);
+
+    useEffect(() => {
+      onFailedRef.current = onFailed;
+    }, [onFailed]);
 
     useEffect(() => {
       isTalkingRef.current = isTalking;
@@ -307,6 +330,7 @@ const ThreeAvatar = forwardRef(
         })
         .catch((err) => {
           console.error('TalkingHead initialization failed:', err);
+          onFailedRef.current?.(err);
         });
 
       return () => {

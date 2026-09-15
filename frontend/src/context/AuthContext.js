@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { supabase, isSupabaseEnabled } from '../lib/supabase';
-import { ensureProfile, mapProfileToUser, updateProfileLevel, refreshProfile } from '../lib/profiles';
+import { ensureProfile, mapProfileToUser, updateProfileLevel, refreshProfile, resetDailyUsageIfNeeded } from '../lib/profiles';
 
 const AuthContext = createContext(null);
 
@@ -11,6 +11,16 @@ export const useAuth = () => {
 };
 
 export function getAuthErrorMessage(error) {
+  const msg = (error?.message || '').toLowerCase();
+  if (msg.includes('invalid login credentials')) {
+    return 'E-posta veya sifre hatali. Hesabiniz yoksa once kayit olun.';
+  }
+  if (msg.includes('email not confirmed')) {
+    return 'E-posta onayi bekleniyor. Dokploy\'da ENABLE_EMAIL_AUTOCONFIRM=true yapin veya Studio\'dan kullaniciyi onaylayin.';
+  }
+  if (msg.includes('user already registered')) {
+    return 'Bu e-posta zaten kayitli. Giris yapmayi deneyin.';
+  }
   return error?.message || 'Islem basarisiz';
 }
 
@@ -27,7 +37,9 @@ export const AuthProvider = ({ children }) => {
       return;
     }
     const profile = await ensureProfile(session.user);
-    const userData = mapProfileToUser(profile, session.user);
+    await resetDailyUsageIfNeeded(session.user.id);
+    const fresh = await refreshProfile(session.user.id);
+    const userData = mapProfileToUser(fresh || profile, session.user);
     localStorage.setItem('speakking_token', session.access_token);
     setToken(session.access_token);
     setUser(userData);

@@ -11,6 +11,8 @@ cd "$ROOT"
 
 REF="${SUPABASE_PROJECT_REF:-lpqtzmjhhmuyyenjemug}"
 PASS="${SUPABASE_DB_PASSWORD:-}"
+HOST="${SUPABASE_DB_HOST:-db.${REF}.supabase.co}"
+PORT="${SUPABASE_DB_PORT:-5432}"
 SEED=false
 
 for arg in "$@"; do
@@ -35,20 +37,20 @@ if ! command -v psql >/dev/null 2>&1; then
   exit 1
 fi
 
-HOST="db.${REF}.supabase.co"
+HOST="${SUPABASE_DB_HOST:-db.${REF}.supabase.co}"
 export PGPASSWORD="$PASS"
 
-echo "→ Baglanti: $HOST (ref: $REF)"
-psql -h "$HOST" -p 5432 -U postgres -d postgres -v ON_ERROR_STOP=1 \
+echo "→ Baglanti: $HOST:$PORT (ref: ${REF:-self-hosted})"
+psql -h "$HOST" -p "$PORT" -U postgres -d postgres -v ON_ERROR_STOP=1 \
   -c "select version();" >/dev/null
 
 echo "→ apply-canli-500.sql"
-psql -h "$HOST" -p 5432 -U postgres -d postgres -v ON_ERROR_STOP=1 \
+psql -h "$HOST" -p "$PORT" -U postgres -d postgres -v ON_ERROR_STOP=1 \
   -f "$ROOT/supabase/apply-canli-500.sql"
 
 if $SEED; then
   echo "→ import-from-mongo.sql"
-  psql -h "$HOST" -p 5432 -U postgres -d postgres -v ON_ERROR_STOP=1 \
+  psql -h "$HOST" -p "$PORT" -U postgres -d postgres -v ON_ERROR_STOP=1 \
     -f "$ROOT/supabase/import-from-mongo.sql"
 fi
 

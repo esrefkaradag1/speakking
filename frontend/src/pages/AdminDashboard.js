@@ -964,10 +964,13 @@ function AIConfigTab({ categories = [] }) {
             value={[config.max_sentences_per_lesson]}
             onValueChange={([v]) => setConfig((c) => ({ ...c, max_sentences_per_lesson: v }))}
             min={1}
-            max={30}
+            max={200}
             step={1}
             data-testid="max-sentences-slider"
           />
+          <p className="text-xs text-slate-500 mt-2">
+            Prompt’a eklenecek cümle bankası üst sınırı (oturumdaki soru sayısı değil). Öneri: 30–100.
+          </p>
         </div>
       </div>
     </div>
@@ -1976,6 +1979,29 @@ export default function AdminDashboard() {
                     <p className="text-xs text-slate-500 mt-2">Speaky'nin sesli yanitlarinin hizi</p>
                   </div>
 
+                  <div className="pt-6 border-t border-white/10">
+                    <h3 className="text-lg font-medium text-white mb-2">Avatar / Gorsel</h3>
+                    <p className="text-xs text-slate-500 mb-4">
+                      Canli avatar modu ortam degiskeni ile ayarlanir (
+                      <code className="text-indigo-300">REACT_APP_AVATAR_PROVIDER</code>
+                      ). Secenekler: <code className="text-slate-300">mp4</code> (video2/video3),
+                      <code className="text-slate-300"> photo</code> (teacher.png + D-ID),
+                      <code className="text-slate-300"> wav2lip</code>,
+                      <code className="text-slate-300"> did</code>,
+                      <code className="text-slate-300"> three</code>.
+                    </p>
+                    <ul className="text-sm text-slate-400 space-y-1 list-disc pl-5">
+                      <li>Idle video: <code className="text-slate-300">/video2.mp4</code></li>
+                      <li>Konusma videosu: <code className="text-slate-300">/video3.mp4</code></li>
+                      <li>Karsilama: <code className="text-slate-300">/merhaba.mp4</code></li>
+                      <li>Foto avatar: <code className="text-slate-300">/teacher.png</code></li>
+                    </ul>
+                    <p className="text-xs text-amber-400/80 mt-3">
+                      Yeni avatar yuklemek icin dosyalari <code>frontend/public/</code> altina koyup
+                      env degiskenlerini guncelleyin; sonra frontend&apos;i yeniden baslatin.
+                    </p>
+                  </div>
+
                   <div className="border-t border-white/10 pt-6 space-y-4">
                     <h3 className="text-lg font-medium text-white">ElevenLabs (premium ses)</h3>
                     <p className="text-xs text-slate-500">
@@ -2441,7 +2467,7 @@ export default function AdminDashboard() {
             <div>
               <Label className="text-slate-300">{editingUser ? 'Yeni Sifre (Opsiyonel)' : 'Sifre'}</Label>
               <Input type="password" value={addUserForm.password} onChange={e => setAddUserForm(f => ({...f, password: e.target.value}))}
-                className="bg-white/5 border-white/10 text-white mt-1" required={!editingUser} placeholder={editingUser ? "Degistirmek istemiyorsaniz bos birakin" : "En az 6 karakter"} />
+                className="bg-white/5 border-white/10 text-white mt-1" required={!editingUser} placeholder={editingUser ? "Degistirmek istemiyorsaniz bos birakin" : "Guclu ve benzersiz sifre (en az 8 karakter)"} />
             </div>
             <div className="flex gap-3">
               <div className="flex-1">

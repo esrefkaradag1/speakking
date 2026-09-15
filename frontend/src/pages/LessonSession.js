@@ -14,6 +14,7 @@ import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { ScrollArea } from '../components/ui/scroll-area';
 import DIDAvatar from '../components/DIDAvatar';
+import PhotoTalkAvatar from '../components/PhotoTalkAvatar';
 import Wav2LipAvatar from '../components/Wav2LipAvatar';
 import ThreeAvatar from '../components/ThreeAvatar';
 
@@ -22,8 +23,9 @@ import { endLesson } from '../lib/lessonApi';
 import { inferTtsSegments, expandSegmentsToSentences } from '../lib/ttsSegments';
 import {
   extractChallengeTurkishSentence,
-  segmentsBeforeUserAnswer,
+  segmentsForTtsPlayback,
 } from '../lib/lessonHints';
+import { preprocessStudentMessage, englishAnswerSimilarity, looksLikePhoneticTurkish } from '../lib/studentMessage';
 import {
   LESSON_VIDEOS,
   unlockAudioElement,
@@ -33,7 +35,7 @@ import {
   prefetchTtsBlobs,
 } from '../lib/lessonMedia';
 import { getDidConfig } from '../lib/didConfig';
-import { getWav2lipConfig, avatarProviderPriority, isWav2lipOnly } from '../lib/wav2lipConfig';
+import { getWav2lipConfig, getInitialAvatarMode, getAvatarFallback, isWav2lipOnly } from '../lib/wav2lipConfig';
 import { checkWav2lipHealth } from '../lib/wav2lipApi';
 import { checkAiBackend } from '../lib/aiHealth';
 
@@ -49,6 +51,16 @@ const HintHelper = ({ sentence, turkishPreview, loading, onHintUsed, variant = '
   }, [sentence, turkishPreview]);
 
   const displaySentence = loading ? '' : (sentence || '');
+  const wordSpans = (() => {
+    const spans = [];
+    const re = /\S+/g;
+    let match;
+    while ((match = re.exec(displaySentence)) !== null) {
+      spans.push({ word: match[0], start: match.index });
+    }
+    return spans;
+  })();
+
   const letterPositions = displaySentence.split('').map((char, idx) => ({
     char,
     idx,
@@ -77,21 +89,33 @@ const HintHelper = ({ sentence, turkishPreview, loading, onHintUsed, variant = '
 
   const letterGrid = (
     <div
-      className={`flex flex-wrap gap-1 font-mono ${isWide ? 'text-base justify-center' : 'text-lg mb-4'}`}
+      className={`flex flex-wrap gap-x-2 gap-y-1 font-mono ${isWide ? 'text-base justify-center' : 'text-lg mb-4'}`}
     >
-      {letterPositions.map((pos, idx) => (
+      {wordSpans.map(({ word, start }, wi) => (
         <span
-          key={idx}
-          className={`inline-flex items-center justify-center min-w-[1.5rem] h-8 rounded
-            ${
-              pos.isLetter
-                ? revealedIndices.has(pos.idx)
-                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/50'
-                  : 'bg-slate-800 text-slate-600 border border-slate-700'
-                : 'text-slate-400'
-            }`}
+          key={`${start}-${wi}`}
+          className="inline-flex gap-0.5 whitespace-nowrap shrink-0 break-keep"
+          style={{ breakInside: 'avoid' }}
         >
-          {pos.isLetter ? (revealedIndices.has(pos.idx) ? pos.char : '_') : pos.char}
+          {word.split('').map((char, ci) => {
+            const gIdx = start + ci;
+            const isLetter = /[a-zA-Z]/.test(char);
+            return (
+              <span
+                key={gIdx}
+                className={`inline-flex items-center justify-center min-w-[1.1rem] h-8 rounded shrink-0
+                  ${
+                    isLetter
+                      ? revealedIndices.has(gIdx)
+                        ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/50'
+                        : 'bg-slate-800 text-slate-600 border border-slate-700'
+                      : 'text-slate-400'
+                  }`}
+              >
+                {isLetter ? (revealedIndices.has(gIdx) ? char : '_') : char}
+              </span>
+            );
+          })}
         </span>
       ))}
     </div>
@@ -197,13 +221,63 @@ const HintHelper = ({ sentence, turkishPreview, loading, onHintUsed, variant = '
 };
 
 // ==================== STRUCTURED CORRECTION CARD ====================
-const CorrectionCard = ({ correction }) => {
+const CorrectionCard = ({ correction, speakyMuted }) => {
+  const [playing, setPlaying] = useState(false);
+
+  const pronounce = async () => {
+    const text = (correction?.correction || '').trim();
+    if (!text) {
+      toast.error('Okunacak duzeltme yok');
+      return;
+    }
+    try {
+      setPlaying(true);
+      const res = await speakText(text, 'en');
+      if (!res.data?.audio) throw new Error('TTS bos');
+      const audioBlob = base64ToBlob(
+        res.data.audio,
+        res.data.format === 'wav' ? 'audio/wav' : 'audio/mpeg'
+      );
+      const url = URL.createObjectURL(audioBlob);
+      const audio = new Audio(url);
+      audio.volume = 1;
+      await new Promise((resolve, reject) => {
+        audio.onended = () => {
+          URL.revokeObjectURL(url);
+          resolve();
+        };
+        audio.onerror = () => {
+          URL.revokeObjectURL(url);
+          reject(new Error('play failed'));
+        };
+        audio.play().catch(reject);
+      });
+    } catch (err) {
+      console.warn('Correction TTS:', err);
+      toast.error('Ses calinamadi — internet/AI sunucusunu kontrol edin');
+    } finally {
+      setPlaying(false);
+    }
+  };
+
   return (
     <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}
       className="glass p-4 border-l-4 border-red-500/70 bg-red-500/5" data-testid="correction-card">
-      <div className="flex items-center gap-2 mb-3">
-        <AlertTriangle className="w-4 h-4 text-red-400" />
-        <span className="text-xs font-semibold text-red-400 uppercase tracking-wide">Duzeltme</span>
+      <div className="flex items-center justify-between gap-2 mb-3">
+        <div className="flex items-center gap-2">
+          <AlertTriangle className="w-4 h-4 text-red-400" />
+          <span className="text-xs font-semibold text-red-400 uppercase tracking-wide">Duzeltme</span>
+        </div>
+        <button
+          type="button"
+          onClick={pronounce}
+          disabled={playing || !correction?.correction}
+          className="p-1.5 rounded-full bg-indigo-600/80 hover:bg-indigo-500 text-white disabled:opacity-40"
+          title={speakyMuted ? 'Speaky sessiz — yine de duzeltmeyi dinle' : 'Dogru cevabi dinle'}
+          data-testid="correction-speak-btn"
+        >
+          {playing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Volume2 className="w-4 h-4" />}
+        </button>
       </div>
       <div className="space-y-2">
         {correction.turkish && (
@@ -370,6 +444,7 @@ export default function LessonSession() {
   const [corrections, setCorrections] = useState([]);
   const [vocabulary, setVocabulary] = useState([]);
   const [sessionEnded, setSessionEnded] = useState(false);
+  const [summaryHoldUntil, setSummaryHoldUntil] = useState(0);
   const [mediaPhase, setMediaPhase] = useState('idle');
   const [voiceMode, setVoiceMode] = useState(true);
   const [speakyMuted, setSpeakyMuted] = useState(false);
@@ -386,21 +461,29 @@ export default function LessonSession() {
   const idleVideoRef = useRef(null);
   const speakingVideoRef = useRef(null);
   const didAvatarRef = useRef(null);
+  const photoTalkRef = useRef(null);
   const wav2lipAvatarRef = useRef(null);
   const threeAvatarRef = useRef(null);
   const didReadyRef = useRef(false);
+  const photoReadyRef = useRef(false);
   const wav2lipReadyRef = useRef(false);
   const threeReadyRef = useRef(false);
   const activeAvatarRef = useRef('three');
   const didConfig = useMemo(() => getDidConfig(), []);
   const wav2lipConfig = useMemo(() => getWav2lipConfig(), []);
   const [didReady, setDidReady] = useState(false);
+  const [photoReady, setPhotoReady] = useState(false);
   const [wav2lipReady, setWav2lipReady] = useState(false);
-  const [activeAvatar, setActiveAvatar] = useState('three');
+  const [activeAvatar, setActiveAvatar] = useState(() => getInitialAvatarMode());
   const [backendOk, setBackendOk] = useState(null);
   const [didFailed, setDidFailed] = useState(false);
+  const [photoFailed, setPhotoFailed] = useState(false);
   const [wav2lipFailed, setWav2lipFailed] = useState(false);
+  const [threeFailed, setThreeFailed] = useState(false);
   const useWav2lipAvatar = activeAvatar === 'wav2lip' && wav2lipReady;
+  const usePhotoTalk = activeAvatar === 'photo' && photoReady;
+  const usePhotoAttempt =
+    activeAvatar === 'photo' && didConfig.enabled && backendOk === true && !photoFailed;
   const useDidAttempt = activeAvatar === 'did' && didConfig.enabled && backendOk === true && !didFailed;
   const useWav2lipAttempt = activeAvatar === 'wav2lip' && wav2lipConfig.enabled && backendOk === true;
   const currentAudioUrlRef = useRef(null);
@@ -412,6 +495,8 @@ export default function LessonSession() {
   const sendTranscribedRef = useRef(null);
   const speakyMutedRef = useRef(false);
   const activeHintTurkishRef = useRef('');
+  const challengeAttemptRef = useRef(0);
+  const currentChallengeRef = useRef('');
   const hintRequestIdRef = useRef(0);
   const [sessionStarted, setSessionStarted] = useState(false);
   const [needsAudioUnlock, setNeedsAudioUnlock] = useState(false);
@@ -422,15 +507,21 @@ export default function LessonSession() {
   const isWaitingUser = mediaPhase === 'waiting';
   const isPausedBetween = mediaPhase === 'paused';
   const hasAiMessage = messages.some((m) => m.role === 'ai');
-  const showAvatarVideo = sessionStarted && hasAiMessage && !videoError;
+  const showAvatarVideo = sessionStarted && !videoError;
   const useDidAvatar = useDidAttempt && didReady;
   const showMp4Layers = showAvatarVideo && activeAvatar === 'mp4';
-  const showThreeAvatar = showAvatarVideo && activeAvatar === 'three';
-  const showMerhabaVideo = showMp4Layers && isSpeaking;
-  const showIdleVideo =
-    showMp4Layers && !isSpeaking && !isPreparingVoice && !isWaitingUser && !isPausedBetween;
-  const showStaticWait =
-    showAvatarVideo && (isWaitingUser || isPausedBetween) && !isSpeaking;
+  const showThreeAvatar = showAvatarVideo && activeAvatar === 'three' && !threeFailed;
+  const showSpeakyAvatar =
+    sessionStarted &&
+    hasAiMessage &&
+    !showThreeAvatar &&
+    !useDidAvatar &&
+    !usePhotoTalk &&
+    !useWav2lipAvatar &&
+    !showMp4Layers &&
+    activeAvatar !== 'wav2lip' &&
+    activeAvatar !== 'photo';
+  const showMerhabaVideo = false;
 
   const unlockAudioPlayback = async () => {
     const ok = await unlockAudioElement(audioRef.current);
@@ -456,6 +547,74 @@ export default function LessonSession() {
       if (onStartCb) onStartCb();
     };
 
+    const playFetchedTts = async () => {
+      const res = await speakText(
+        truncateTts(seg.text),
+        seg.lang === 'en' ? 'en' : 'tr'
+      );
+      if (!res.data?.audio || isCancelled(gen)) return;
+      const mime = res.data.format === 'wav' ? 'audio/wav' : 'audio/mpeg';
+      const url = URL.createObjectURL(base64ToBlob(res.data.audio, mime));
+      try {
+        await playAudioUrl(audioRef.current, url, {
+          isCancelled: () => isCancelled(gen),
+          onSpeakStart: handleStart,
+          onSpeakEnd: () => {
+            if (!isCancelled(gen)) setMediaPhase('paused');
+          },
+        });
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+    };
+
+    // photoReadyRef ile kontrol et — state render gecikmesi yuzunden kacmasin
+    if (activeAvatarRef.current === 'photo' && !photoFailed) {
+      for (let i = 0; i < 20 && !photoReadyRef.current; i += 1) {
+        await new Promise((r) => setTimeout(r, 250));
+        if (isCancelled(gen)) return;
+      }
+    }
+    if (
+      activeAvatarRef.current === 'photo' &&
+      photoReadyRef.current &&
+      photoTalkRef.current?.speakAndWait
+    ) {
+      try {
+        await photoTalkRef.current.speakAndWait(seg.text, seg.lang, {
+          isCancelled: () => isCancelled(gen),
+          onSpeakStart: handleStart,
+          onSpeakEnd: () => {
+            if (!isCancelled(gen)) setMediaPhase('paused');
+          },
+        });
+        return;
+      } catch (err) {
+        console.warn('PhotoTalk basarisiz, TTS + video yedegi:', err);
+        const status = err?.response?.status;
+        const detail = String(
+          err?.response?.data?.detail || err?.message || ''
+        );
+        const noCredits =
+          status === 402 ||
+          /InsufficientCredits|not enough credits|payment required/i.test(detail);
+        if (noCredits) {
+          photoReadyRef.current = false;
+          setPhotoReady(false);
+          setPhotoFailed(true);
+          setActiveAvatar(getAvatarFallback('photo'));
+          toast.info('D-ID kredisi yok — konusma videosu yedegi acildi', {
+            duration: 4000,
+          });
+        }
+        try {
+          await playFetchedTts();
+          return;
+        } catch (e2) {
+          console.warn('TTS yedek de basarisiz:', e2);
+        }
+      }
+    }
     if (useWav2lipAvatar && wav2lipAvatarRef.current?.speakAndWait) {
       try {
         await wav2lipAvatarRef.current.speakAndWait(seg.text, seg.lang, {
@@ -468,8 +627,13 @@ export default function LessonSession() {
         return;
       } catch (err) {
         console.warn('Wav2Lip basarisiz, TTS yedegi:', err);
-        setWav2lipFailed(true);
-        setActiveAvatar('three');
+        try {
+          await playFetchedTts();
+          return;
+        } catch {
+          setWav2lipFailed(true);
+          setActiveAvatar(getAvatarFallback('wav2lip'));
+        }
       }
     }
     if (useDidAvatar && didAvatarRef.current?.speakAndWait) {
@@ -514,6 +678,12 @@ export default function LessonSession() {
       });
       return;
     }
+    try {
+      await playFetchedTts();
+      return;
+    } catch (err) {
+      console.warn('TTS fetch basarisiz, tarayici TTS:', err);
+    }
     handleStart();
     await speakWithBrowserTts(seg.text, seg.lang === 'en' ? 'en' : 'tr');
     if (!isCancelled(gen)) setMediaPhase('paused');
@@ -529,7 +699,9 @@ export default function LessonSession() {
       const segments = expandSegmentsToSentences(
         (ttsSegments?.length ? ttsSegments : inferTtsSegments(text)).filter((s) => s?.text?.trim())
       );
-      const speakSegments = segmentsBeforeUserAnswer(text, segments);
+      const speakSegments = segmentsForTtsPlayback(text, segments, {
+        hasCorrections: Boolean(apiData?.corrections?.length),
+      });
       const progressiveReveal = !skipReveal && speakSegments.length > 1;
 
       if (!skipReveal) {
@@ -568,14 +740,13 @@ export default function LessonSession() {
       };
 
       const useLipSyncPlayback =
+        (activeAvatarRef.current === 'photo' && photoReadyRef.current) ||
         (activeAvatarRef.current === 'wav2lip' && wav2lipReadyRef.current) ||
         (activeAvatarRef.current === 'did' && didReadyRef.current);
-      const ttsPrefetch =
-        activeAvatarRef.current === 'wav2lip'
-          ? Promise.resolve(speakSegments.map(() => null))
-          : prefetchTtsBlobs(speakSegments, fetchSegmentAudio, {
-              isCancelled: () => isCancelled(gen),
-            });
+      // Her zaman TTS onbellekle — avatar basarisiz olsa bile EN/TR cumleler okunur
+      const ttsPrefetch = prefetchTtsBlobs(speakSegments, fetchSegmentAudio, {
+        isCancelled: () => isCancelled(gen),
+      });
 
       if (!audioUnlockedRef.current && !useLipSyncPlayback) {
         setNeedsAudioUnlock(true);
@@ -748,6 +919,19 @@ export default function LessonSession() {
           await new Promise((r) => setTimeout(r, 200));
         }
       }
+      if (activeAvatarRef.current === 'photo') {
+        for (let i = 0; i < 40 && !photoReadyRef.current && !photoFailed; i += 1) {
+          await new Promise((r) => setTimeout(r, 250));
+        }
+      }
+      if (activeAvatarRef.current === 'wav2lip') {
+        for (let i = 0; i < 25 && !wav2lipReadyRef.current && !wav2lipFailed; i += 1) {
+          await new Promise((r) => setTimeout(r, 200));
+        }
+        if (wav2lipAvatarRef.current?.playWelcome) {
+          await wav2lipAvatarRef.current.playWelcome();
+        }
+      }
       await sendInitialMessage();
       return;
     }
@@ -771,71 +955,71 @@ export default function LessonSession() {
   };
 
   useEffect(() => {
-    if (!sessionStarted || videoError) return;
-    const idle = idleVideoRef.current;
+    if (!sessionStarted || videoError || activeAvatar !== 'mp4') return;
     const speaking = speakingVideoRef.current;
+    const idle = idleVideoRef.current;
     const intro = introVideoRef.current;
-    if (!idle || !speaking) return;
+    if (!speaking) return;
 
     [idle, speaking, intro].forEach((v) => {
       if (!v) return;
       v.muted = true;
       v.playsInline = true;
-      if (v !== intro) v.loop = true;
+      v.volume = 0;
     });
 
-    if (
-      !showAvatarVideo ||
-      mediaPhase === 'thinking' ||
-      mediaPhase === 'preparing' ||
-      mediaPhase === 'waiting' ||
-      mediaPhase === 'paused'
-    ) {
-      [idle, speaking, intro].forEach((v) => v?.pause());
+    const freezeOnFrame = () => {
+      speaking.pause();
+      idle?.pause();
+      intro?.pause();
+      // Videodan sabit kare (baslangic — agiz kapali durus)
+      const freezeAt = 0.08;
+      const apply = () => {
+        try {
+          if (Number.isFinite(speaking.duration) && speaking.duration > 0) {
+            speaking.currentTime = Math.min(freezeAt, Math.max(0, speaking.duration - 0.05));
+          } else {
+            speaking.currentTime = freezeAt;
+          }
+        } catch {
+          /* ignore */
+        }
+      };
+      if (speaking.readyState >= 2) apply();
+      else {
+        const onMeta = () => {
+          speaking.removeEventListener('loadeddata', onMeta);
+          apply();
+        };
+        speaking.addEventListener('loadeddata', onMeta);
+        speaking.load();
+      }
+    };
+
+    if (mediaPhase !== 'speaking') {
+      freezeOnFrame();
       return;
     }
 
-    if (mediaPhase === 'speaking') {
-      if (intro) {
-        intro.loop = true;
-        intro.muted = true;
-        intro.volume = 0;
-        if (intro.paused) {
-          try {
-            intro.currentTime = 0;
-          } catch {
-            /* ignore */
-          }
-          intro.play().catch(() => {});
-        }
-      }
-      idle.pause();
-      speaking.pause();
-      return;
-    }
-    if (intro) {
-      intro.pause();
-      intro.loop = false;
-      try {
-        intro.currentTime = 0;
-      } catch {
-        /* ignore */
-      }
-    }
-    speaking.pause();
+    // Cumle basladi: video oynasin
+    idle?.pause();
+    intro?.pause();
+    speaking.loop = true;
+    speaking.muted = true;
     try {
       speaking.currentTime = 0;
     } catch {
       /* ignore */
     }
-    idle.play().catch(() => {});
-  }, [mediaPhase, sessionStarted, videoError, showAvatarVideo]);
+    speaking.play().catch(() => {});
+  }, [mediaPhase, sessionStarted, videoError, activeAvatar]);
 
   useEffect(() => {
+    if (activeAvatar !== 'mp4') return;
     [introVideoRef, idleVideoRef, speakingVideoRef].forEach((ref) => {
       ref.current?.load();
     });
-  }, []);
+  }, [activeAvatar]);
 
   useEffect(() => {
     let cancelled = false;
@@ -853,11 +1037,29 @@ export default function LessonSession() {
 
   const handleThreeReady = useCallback(() => {
     threeReadyRef.current = true;
+    setThreeFailed(false);
+  }, []);
+
+  const handleThreeFailed = useCallback(() => {
+    threeReadyRef.current = false;
+    setThreeFailed(true);
+  }, []);
+
+  const handlePhotoReady = useCallback(() => {
+    photoReadyRef.current = true;
+    setPhotoReady(true);
+  }, []);
+
+  const handlePhotoFailed = useCallback(() => {
+    photoReadyRef.current = false;
+    setPhotoReady(false);
+    setPhotoFailed(true);
+    setActiveAvatar(getAvatarFallback('photo'));
   }, []);
 
   useEffect(() => {
     if (backendOk !== true) return undefined;
-    setActiveAvatar('three');
+    setActiveAvatar(getInitialAvatarMode());
   }, [backendOk]);
 
   const requestHint = async (turkishSentence) => {
@@ -924,12 +1126,17 @@ export default function LessonSession() {
     const turkishSentence = extractChallengeTurkishSentence(lastAiMessage.content);
     if (!turkishSentence) {
       activeHintTurkishRef.current = '';
+      currentChallengeRef.current = '';
       hintRequestIdRef.current += 1;
       setCurrentHint(null);
       return;
     }
 
     const norm = turkishSentence.trim();
+    if (norm !== currentChallengeRef.current) {
+      currentChallengeRef.current = norm;
+      challengeAttemptRef.current = 0;
+    }
     if (norm === activeHintTurkishRef.current && currentHint?.english && !currentHint?.loading) {
       return;
     }
@@ -998,10 +1205,13 @@ export default function LessonSession() {
         ],
       );
     } catch (error) {
+      const detail = error?.response?.data?.detail;
       const msg =
         error?.code === 'ERR_NETWORK' || error?.message?.includes('Network')
           ? 'AI sunucusuna ulasilamadi (port 8001 acik mi?)'
-          : 'Speaky ile baglanti kurulamadi';
+          : typeof detail === 'string'
+            ? detail
+            : 'Speaky ile baglanti kurulamadi';
       toast.error(msg, { duration: 6000 });
       console.error(error);
       setIsLoading(false);
@@ -1010,43 +1220,96 @@ export default function LessonSession() {
   };
 
   const recognitionRef = useRef(null);
+  const asrPassRef = useRef('en'); // en | tr-retry
+  const pendingEnTranscriptRef = useRef('');
 
   useEffect(() => {
     if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
       const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
       const rec = new SpeechRecognition();
-      rec.continuous = true;
+      rec.continuous = false;
       rec.interimResults = true;
       rec.lang = 'en-US';
-      rec.maxAlternatives = 1;
+      rec.maxAlternatives = 5;
 
       rec.onresult = (event) => {
-        let transcript = '';
+        let best = '';
+        let bestScore = -1;
         for (let i = event.resultIndex; i < event.results.length; i++) {
-          if (event.results[i].isFinal) {
-            transcript += event.results[i][0].transcript;
+          if (!event.results[i].isFinal) continue;
+          for (let a = 0; a < event.results[i].length; a++) {
+            const alt = event.results[i][a];
+            const conf = typeof alt.confidence === 'number' ? alt.confidence : 0.5;
+            if (conf >= bestScore) {
+              bestScore = conf;
+              best = alt.transcript;
+            }
           }
         }
-        transcript = transcript.trim();
-        if (transcript && sendTranscribedRef.current) {
+        const transcript = best.trim();
+        if (!transcript || !sendTranscribedRef.current) return;
+
+        // en-US sonucu Turkce yardim gibiyse bir kez tr-TR ile tekrar dinle
+        if (asrPassRef.current === 'en' && looksLikePhoneticTurkish(transcript)) {
+          pendingEnTranscriptRef.current = transcript;
+          asrPassRef.current = 'tr-retry';
           try {
             rec.stop();
           } catch {
             /* ignore */
           }
-          sendTranscribedRef.current(transcript);
+          setTimeout(() => {
+            try {
+              rec.lang = 'tr-TR';
+              rec.start();
+              setIsRecording(true);
+              toast.info('Turkce algilaniyor…', { duration: 1500 });
+            } catch {
+              asrPassRef.current = 'en';
+              sendTranscribedRef.current(pendingEnTranscriptRef.current);
+              pendingEnTranscriptRef.current = '';
+            }
+          }, 280);
+          return;
         }
+
+        const finalText =
+          asrPassRef.current === 'tr-retry' && transcript
+            ? transcript
+            : transcript || pendingEnTranscriptRef.current;
+
+        asrPassRef.current = 'en';
+        pendingEnTranscriptRef.current = '';
+        try {
+          rec.stop();
+        } catch {
+          /* ignore */
+        }
+        sendTranscribedRef.current(finalText);
       };
 
-      rec.onend = () => setIsRecording(false);
+      rec.onend = () => {
+        // tr-retry baslatilirken onend gelebilir — kaydi kapatma
+        if (asrPassRef.current === 'tr-retry') return;
+        setIsRecording(false);
+      };
 
       rec.onerror = (event) => {
         console.error('Speech recognition error', event.error);
+        if (asrPassRef.current === 'tr-retry' && pendingEnTranscriptRef.current) {
+          const fallback = pendingEnTranscriptRef.current;
+          asrPassRef.current = 'en';
+          pendingEnTranscriptRef.current = '';
+          setIsRecording(false);
+          if (sendTranscribedRef.current) sendTranscribedRef.current(fallback);
+          return;
+        }
+        asrPassRef.current = 'en';
         setIsRecording(false);
         if (event.error === 'not-allowed') {
           toast.error('Mikrofon izni gerekli. Adres cubugundaki kilit ikonundan izin verin.');
         } else if (event.error === 'no-speech') {
-          toast.info('Ses algilanmadi. Ingilizce konusup tekrar deneyin.');
+          toast.info('Ses algilanmadi. Tekrar deneyin veya yazarak gonderin.');
         } else if (event.error !== 'aborted') {
           toast.error('Mikrofon hatasi: ' + event.error);
         }
@@ -1079,10 +1342,12 @@ export default function LessonSession() {
     const micOk = await ensureMicPermission();
     if (!micOk) return;
     try {
+      asrPassRef.current = 'en';
+      pendingEnTranscriptRef.current = '';
       recognitionRef.current.lang = 'en-US';
       recognitionRef.current.start();
       setIsRecording(true);
-      toast.info('Ingilizce konusun — bitince otomatik gonderilir', { duration: 2500 });
+      toast.info('Ingilizce cevap veya Turkce yardim — bitince gonderilir', { duration: 2800 });
     } catch (error) {
       if (error?.message?.includes('already started')) {
         recognitionRef.current.stop();
@@ -1116,20 +1381,95 @@ export default function LessonSession() {
     );
   };
 
-  const sendTranscribedMessage = async (user_text) => {
-    if (!user_text?.trim() || isLoading) return;
+  const submitUserMessage = async (rawMessage, { voice = false } = {}) => {
+    const trimmed = String(rawMessage || '').trim();
+    if (!trimmed || isLoading) return;
+
+    const pre = preprocessStudentMessage(trimmed);
+
+    if (pre.kind === 'help') {
+      cancelPlayback();
+      flushSync(() => {
+        setMessages((prev) => [...prev, { role: 'user', content: trimmed, voice }]);
+      });
+      setIsLoading(true);
+      setMediaPhase('thinking');
+      try {
+        const response = await axios.post(
+          `${getAiApiBase()}/chat`,
+          {
+            session_id: sessionId,
+            message: trimmed,
+            message_kind: 'help',
+          },
+          { headers: await getAuthHeaders() }
+        );
+        await runAiTurn(response.data, (prev) => [
+          ...prev,
+          {
+            role: 'ai',
+            content: response.data.response,
+            tts_segments: response.data.tts_segments,
+          },
+        ]);
+      } catch (error) {
+        toast.error(error.response?.data?.detail || 'Mesaj gonderilemedi');
+        setIsLoading(false);
+        setMediaPhase('idle');
+      }
+      return;
+    }
+
+    const answerText = pre.englishAnswer || trimmed;
+    // Zayif telaffuz / ASR hatasi: beklenen cevaba cok yakinysa duzelt
+    let finalAnswer = answerText;
+    if (currentHint?.english) {
+      const sim = englishAnswerSimilarity(answerText, currentHint.english);
+      if (sim >= 0.72) {
+        finalAnswer = currentHint.english.trim();
+      }
+    }
+    const challenge = currentChallengeRef.current;
+    const attempt = challenge ? challengeAttemptRef.current + 1 : 1;
+
     cancelPlayback();
     flushSync(() => {
-      setMessages((prev) => [...prev, { role: 'user', content: user_text, voice: true }]);
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'user',
+          content: finalAnswer !== answerText ? `${trimmed} → ${finalAnswer}` : trimmed,
+          voice,
+        },
+      ]);
     });
     setIsLoading(true);
     setMediaPhase('thinking');
     try {
       const response = await axios.post(
         `${getAiApiBase()}/chat`,
-        { session_id: sessionId, message: user_text },
+        {
+          session_id: sessionId,
+          message: finalAnswer,
+          message_kind: 'answer',
+          challenge_attempt: attempt,
+          current_challenge: challenge || undefined,
+        },
         { headers: await getAuthHeaders() }
       );
+
+      const prevChallenge = challenge;
+      const newChallenge = extractChallengeTurkishSentence(response.data?.response || '');
+      const sameChallenge =
+        prevChallenge &&
+        newChallenge &&
+        prevChallenge.trim().toLocaleLowerCase('tr') === newChallenge.trim().toLocaleLowerCase('tr');
+
+      if (sameChallenge) {
+        challengeAttemptRef.current = attempt;
+      } else {
+        challengeAttemptRef.current = 0;
+      }
 
       await runAiTurn(
         response.data,
@@ -1147,6 +1487,10 @@ export default function LessonSession() {
       setIsLoading(false);
       setMediaPhase('idle');
     }
+  };
+
+  const sendTranscribedMessage = async (user_text) => {
+    await submitUserMessage(user_text, { voice: true });
   };
 
   useEffect(() => {
@@ -1159,44 +1503,19 @@ export default function LessonSession() {
     await ensureAudioUnlocked();
     const userMessage = inputText.trim();
     setInputText('');
-    cancelPlayback();
-    flushSync(() => {
-      setMessages((prev) => [...prev, { role: 'user', content: userMessage }]);
-    });
-    setIsLoading(true);
-    setMediaPhase('thinking');
-    try {
-      const response = await axios.post(
-        `${getAiApiBase()}/chat`,
-        { message: userMessage, session_id: sessionId },
-        { headers: await getAuthHeaders() }
-      );
-      await runAiTurn(
-        response.data,
-        (prev) => [
-          ...prev,
-          {
-            role: 'ai',
-            content: response.data.response,
-            tts_segments: response.data.tts_segments,
-          },
-        ]
-      );
-    } catch (error) {
-      toast.error(error.response?.data?.detail || 'Mesaj gonderilemedi');
-      setIsLoading(false);
-      setMediaPhase('idle');
-    }
+    await submitUserMessage(userMessage, { voice: false });
   };
 
   const endSession = async () => {
     if (sessionEnded) return;
+    cancelPlayback();
     setSessionEnded(true);
+    setSummaryHoldUntil(Date.now() + 12000);
     try {
       const durationMinutes = (Date.now() - sessionStartRef.current) / 60000;
       if (user?.id) await endLesson(user.id, sessionId, durationMinutes);
       await refreshUser();
-      toast.success('Oturum tamamlandi!');
+      toast.success('Oturum tamamlandi! Ozeti inceleyebilirsiniz.', { duration: 5000 });
     } catch (error) {
       console.error('Failed to end session:', error);
     }
@@ -1205,6 +1524,13 @@ export default function LessonSession() {
   const handleEndSession = async () => {
     if (timerRef.current) clearInterval(timerRef.current);
     await endSession();
+  };
+
+  const leaveToHome = () => {
+    if (summaryHoldUntil && Date.now() < summaryHoldUntil) {
+      toast.info('Ozeti birka sn inceleyin…', { duration: 2000 });
+      return;
+    }
     navigate('/');
   };
 
@@ -1278,17 +1604,32 @@ export default function LessonSession() {
              <div className="flex-1 glass rounded-3xl flex flex-col items-center justify-center relative overflow-hidden min-h-[400px]">
                 <div className="absolute inset-0 bg-indigo-500/5 z-10 pointer-events-none"></div>
                 <>
-                  {useWav2lipAttempt && sessionStarted && (
+                  {usePhotoAttempt && (
                     <div
-                      className={`absolute inset-0 z-20 transition-opacity duration-300 ${
-                        useWav2lipAvatar ? 'opacity-100' : 'opacity-0 pointer-events-none'
+                      className={`absolute inset-0 z-30 transition-opacity duration-300 ${
+                        sessionStarted ? 'opacity-100' : 'opacity-0 pointer-events-none'
                       }`}
                     >
+                      <PhotoTalkAvatar
+                        ref={photoTalkRef}
+                        active={usePhotoAttempt}
+                        photoUrl={LESSON_VIDEOS.teacherPhoto}
+                        idleVideoUrl={LESSON_VIDEOS.idle}
+                        onSpeakStart={() => setMediaPhase('speaking')}
+                        onSpeakEnd={() => setMediaPhase('paused')}
+                        onReady={handlePhotoReady}
+                        onFailed={handlePhotoFailed}
+                      />
+                    </div>
+                  )}
+                  {(useWav2lipAttempt || activeAvatar === 'wav2lip') && sessionStarted && !wav2lipFailed && (
+                    <div className="absolute inset-0 z-30 opacity-100">
                       <Wav2LipAvatar
                         ref={wav2lipAvatarRef}
                         audioRef={audioRef}
                         active={useWav2lipAttempt && !wav2lipFailed}
-                        idleVideoUrl={wav2lipConfig.faceVideoUrl}
+                        idleVideoUrl={wav2lipConfig.faceVideoUrl || LESSON_VIDEOS.idle}
+                        welcomeVideoUrl={LESSON_VIDEOS.welcome}
                         onSpeakStart={() => setMediaPhase('speaking')}
                         onSpeakEnd={() => setMediaPhase('paused')}
                         onReady={() => {
@@ -1299,7 +1640,7 @@ export default function LessonSession() {
                           wav2lipReadyRef.current = false;
                           setWav2lipReady(false);
                           setWav2lipFailed(true);
-                          setActiveAvatar('three');
+                          setActiveAvatar(getAvatarFallback('wav2lip'));
                         }}
                       />
                     </div>
@@ -1324,19 +1665,29 @@ export default function LessonSession() {
                           didReadyRef.current = false;
                           setDidReady(false);
                           setDidFailed(true);
-                          setActiveAvatar('three');
+                          setActiveAvatar(getAvatarFallback('did'));
                         }}
                       />
                     </div>
                   )}
+                  {activeAvatar === 'three' && (
                   <ThreeAvatar
                     ref={threeAvatarRef}
-                    active={activeAvatar === 'three'}
+                    active={activeAvatar === 'three' && !threeFailed}
                     audioRef={audioRef}
                     isTalking={isSpeaking}
                     onReady={handleThreeReady}
+                    onFailed={handleThreeFailed}
                     className={`absolute inset-0 z-20 transition-opacity duration-300 ${showThreeAvatar ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
                   />
+                  )}
+                  {showSpeakyAvatar && (
+                    <div className="absolute inset-0 z-[18] flex flex-col items-center justify-center">
+                      <SpeakyCharacter size="lg" isTalking={isSpeaking || isLoading || isPreparingVoice} />
+                    </div>
+                  )}
+                  {activeAvatar === 'mp4' && (
+                    <>
                   <video
                     ref={introVideoRef}
                     src={LESSON_VIDEOS.welcome}
@@ -1350,9 +1701,7 @@ export default function LessonSession() {
                   <video
                     ref={idleVideoRef}
                     src={LESSON_VIDEOS.idle}
-                    className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-150 ${
-                      !showIdleVideo ? 'opacity-0' : 'opacity-100'
-                    }`}
+                    className="absolute inset-0 w-full h-full object-cover opacity-0 pointer-events-none"
                     loop
                     muted
                     playsInline
@@ -1365,13 +1714,25 @@ export default function LessonSession() {
                   <video
                     ref={speakingVideoRef}
                     src={LESSON_VIDEOS.speaking}
-                    className="absolute inset-0 w-full h-full object-cover opacity-0 pointer-events-none"
+                    className="absolute inset-0 w-full h-full object-cover z-[14] opacity-100"
                     loop
                     muted
                     playsInline
                     preload="auto"
-                    aria-hidden
+                    onLoadedData={(e) => {
+                      // Ilk kareyi sabitle (konusma oncesi)
+                      if (mediaPhase !== 'speaking') {
+                        try {
+                          e.currentTarget.currentTime = 0.08;
+                          e.currentTarget.pause();
+                        } catch {
+                          /* ignore */
+                        }
+                      }
+                    }}
                   />
+                    </>
+                  )}
                   {videoError && sessionStarted && (
                     <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-slate-900/80">
                       <SpeakyCharacter size="lg" isTalking={isSpeaking} />
@@ -1381,11 +1742,6 @@ export default function LessonSession() {
                   {sessionStarted && !showAvatarVideo && !videoError && (
                     <div className="absolute inset-0 z-[12] flex flex-col items-center justify-center bg-slate-900/70">
                       <SpeakyCharacter size="lg" isTalking={isLoading || isPreparingVoice} />
-                    </div>
-                  )}
-                  {showStaticWait && (
-                    <div className="absolute inset-0 z-[12] flex flex-col items-center justify-center bg-slate-900/50">
-                      <SpeakyCharacter size="lg" isTalking={false} />
                     </div>
                   )}
                 </>
@@ -1422,6 +1778,13 @@ export default function LessonSession() {
                   </div>
                 )}
                 
+                  {isLoading && (
+                    <div className="absolute inset-0 z-[25] flex flex-col items-center justify-center bg-slate-950/55 backdrop-blur-[2px]">
+                      <Loader2 className="w-10 h-10 text-indigo-400 animate-spin mb-3" />
+                      <p className="text-sm text-white font-medium">Bir sonraki soruya hazirlanin…</p>
+                      <p className="text-xs text-slate-400 mt-1">Speaky cevabi hazirliyor</p>
+                    </div>
+                  )}
                 <div className="absolute bottom-8 left-0 right-0 z-20 flex justify-center">
                   <div className="bg-black/40 backdrop-blur-md px-6 py-2.5 rounded-full border border-white/10 shadow-lg shadow-black/20">
                     <p className="text-center text-sm font-medium text-white flex items-center gap-2">
@@ -1429,9 +1792,9 @@ export default function LessonSession() {
                       {(isLoading || isPreparingVoice) && <Loader2 className="w-4 h-4 text-indigo-400 animate-spin" />}
                       {isSpeaking && <Volume2 className="w-4 h-4 text-emerald-400" />}
                       {isRecording ? 'Dinliyorum... Durdurmak icin tikla' 
-                        : isLoading ? 'Speaky dusunuyor...'
-                        : isPreparingVoice ? 'Ses hazirlaniyor...'
-                        : isSpeaking ? 'Speaky konusuyor...'
+                        : isLoading ? 'Bir sonraki soruya hazirlanin…'
+                        : isPreparingVoice ? 'Ses hazirlaniyor…'
+                        : isSpeaking ? 'Speaky konusuyor…'
                         : isWaitingUser
                           ? 'Siradaki cumleyi Ingilizce konus'
                           : voiceMode
@@ -1493,7 +1856,7 @@ export default function LessonSession() {
                     {corrections.length > 0 ? (
                       <AnimatePresence mode="sync">
                         {corrections.slice().reverse().map((correction, i) => (
-                          <CorrectionCard key={`c-${i}`} correction={correction} />
+                          <CorrectionCard key={`c-${i}`} correction={correction} speakyMuted={speakyMuted} />
                         ))}
                       </AnimatePresence>
                     ) : (
@@ -1643,8 +2006,8 @@ export default function LessonSession() {
                   <p className="text-[10px] text-slate-400">Mesaj</p>
                 </div>
               </div>
-              <p className="text-slate-400 mb-6">Yarin yine beklerim!</p>
-              <Button onClick={() => navigate('/')} className="bg-indigo-600 hover:bg-indigo-500 text-white rounded-full px-8"
+              <p className="text-slate-400 mb-6">Ozeti inceleyin, sonra ana sayfaya donebilirsiniz.</p>
+              <Button onClick={leaveToHome} className="bg-indigo-600 hover:bg-indigo-500 text-white rounded-full px-8"
                 data-testid="return-home-btn">
                 Ana Sayfaya Don
               </Button>

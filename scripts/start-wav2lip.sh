@@ -6,7 +6,12 @@ PORT="${WAV2LIP_PORT:-5050}"
 lsof -ti:"$PORT" 2>/dev/null | xargs kill -9 2>/dev/null || true
 
 export WAV2LIP_REPO="${WAV2LIP_REPO:-$ROOT/external/Wav2Lip}"
-export WAV2LIP_FACE_VIDEO="${WAV2LIP_FACE_VIDEO:-$ROOT/frontend/public/video2.mp4}"
+# Kisa yuz dongusu (TTS suresine gore loop); yoksa video2
+if [[ -f "$ROOT/frontend/public/face-loop.mp4" ]]; then
+  export WAV2LIP_FACE_VIDEO="${WAV2LIP_FACE_VIDEO:-$ROOT/frontend/public/face-loop.mp4}"
+else
+  export WAV2LIP_FACE_VIDEO="${WAV2LIP_FACE_VIDEO:-$ROOT/frontend/public/video2.mp4}"
+fi
 export WAV2LIP_FORCE_FFMPEG="${WAV2LIP_FORCE_FFMPEG:-1}"
 
 cd "$ROOT"

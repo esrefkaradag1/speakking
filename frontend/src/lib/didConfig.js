@@ -14,8 +14,12 @@ export function getDidConfig() {
   const apiKey = (process.env.REACT_APP_DID_API_KEY || '').trim();
   const sourceUrl = (process.env.REACT_APP_DID_SOURCE_URL || '').trim() || DEFAULT_PRESENTER;
   const useProxy = process.env.REACT_APP_DID_USE_PROXY !== 'false';
-  const explicitlyOn = process.env.REACT_APP_DID_ENABLED === 'true';
-  const ttsProvider = (process.env.REACT_APP_DID_TTS_PROVIDER || 'elevenlabs').toLowerCase();
+  const provider = (process.env.REACT_APP_AVATAR_PROVIDER || '').toLowerCase();
+  const explicitlyOn =
+    process.env.REACT_APP_DID_ENABLED === 'true' ||
+    provider === 'did' ||
+    provider === 'photo';
+  const ttsProvider = (process.env.REACT_APP_DID_TTS_PROVIDER || 'microsoft').toLowerCase();
   return {
     enabled: explicitlyOn && (Boolean(apiKey) || useProxy),
     apiKey,

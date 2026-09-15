@@ -204,6 +204,15 @@ export default function LandingPage() {
                     <Trophy className="w-4 h-4 mr-2" />
                     İlerlemem
                   </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => navigate('/payment')}
+                    className="text-slate-300 hover:text-white"
+                    data-testid="payment-btn"
+                  >
+                    Abonelik
+                  </Button>
                   {user.is_admin && (
                     <Button
                       variant="ghost"

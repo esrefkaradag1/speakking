@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { toast } from 'sonner';
-import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
 import {
   ArrowLeft, Trophy, Flame, Clock, Target,
@@ -15,7 +14,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { ScrollArea } from '../components/ui/scroll-area';
 
 import { getStudentProgress, getStudentBadges, getRecentCorrections } from '../lib/studentApi';
-import { getAuthHeaders, getAiApiBase } from '../lib/apiAuth';
+import { speakText } from '../lib/apiAuth';
 
 // Speaky Character - Realistic 3D Style
 const SpeakyCharacter = ({ size = "md", mood = "happy" }) => {
@@ -114,19 +113,28 @@ const CorrectionReviewCard = ({ correction, token }) => {
   const playCorrection = async () => {
     try {
       setIsPlaying(true);
-      const text = `Yanlış: ${correction.original}. Doğrusu: ${correction.correction}`;
-      const headers = await getAuthHeaders();
-      const response = await axios.post(
-        `${getAiApiBase()}/voice/speak?text=${encodeURIComponent(text)}&voice=nova`,
-        {},
-        { headers }
-      );
-      
-      const audio = new Audio(`data:audio/mp3;base64,${response.data.audio}`);
-      audio.onended = () => setIsPlaying(false);
-      audio.play();
+      // TR aciklama + EN dogru cumle ayri ses
+      const parts = [
+        { text: `Yanlış: ${correction.original}`, lang: 'tr' },
+        { text: `Doğrusu: ${correction.correction}`, lang: 'tr' },
+      ];
+      if (correction.correction) {
+        parts.push({ text: correction.correction, lang: 'en' });
+      }
+      for (const part of parts) {
+        const response = await speakText(part.text, part.lang);
+        const mime = response.data?.format === 'wav' ? 'audio/wav' : 'audio/mpeg';
+        const audio = new Audio(`data:${mime};base64,${response.data.audio}`);
+        await new Promise((resolve, reject) => {
+          audio.onended = resolve;
+          audio.onerror = reject;
+          audio.play().catch(reject);
+        });
+      }
     } catch (error) {
       console.error('TTS error:', error);
+      toast.error('Ses calinamadi');
+    } finally {
       setIsPlaying(false);
     }
   };

@@ -5,6 +5,7 @@ import LandingPage from "./pages/LandingPage";
 import LessonSession from "./pages/LessonSession";
 import AdminDashboard from "./pages/AdminDashboard";
 import StudentDashboard from "./pages/StudentDashboard";
+import PaymentPage from "./pages/PaymentPage";
 import "./App.css";
 
 const ProtectedRoute = ({ children, adminOnly = false }) => {
@@ -60,6 +61,14 @@ function App() {
               element={
                 <ProtectedRoute>
                   <StudentDashboard />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/payment" 
+              element={
+                <ProtectedRoute>
+                  <PaymentPage />
                 </ProtectedRoute>
               } 
             />

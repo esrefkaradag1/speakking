@@ -1,9 +1,11 @@
 /** Ders oturumu: metin → ses → video tek akista */
 
 export const LESSON_VIDEOS = {
-  welcome: '/merhaba.mp4',
-  idle: '/video2.mp4',
-  speaking: '/video3.mp4',
+  welcome: process.env.REACT_APP_LESSON_WELCOME_VIDEO || '/merhaba.mp4',
+  idle: process.env.REACT_APP_LESSON_IDLE_VIDEO || '/video2.mp4',
+  speaking: process.env.REACT_APP_LESSON_SPEAKING_VIDEO || '/video3.mp4',
+  faceAlt: '/ornek.mov',
+  teacherPhoto: '/teacher.png',
 };
 
 const SILENT_WAV =

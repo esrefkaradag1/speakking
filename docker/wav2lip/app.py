@@ -61,13 +61,46 @@ def _to_wav(audio_path: Path, work: Path) -> Path:
     return wav_path
 
 
+def _audio_duration_sec(audio_path: Path) -> float:
+    """ffprobe ile ses suresi; basarisizsa 0."""
+    try:
+        proc = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                str(audio_path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if proc.returncode == 0 and proc.stdout.strip():
+            return max(0.1, float(proc.stdout.strip()))
+    except Exception:
+        pass
+    return 0.0
+
+
 def _run_ffmpeg_mux(face_path: Path, audio_path: Path, out_path: Path) -> None:
+    """
+    Yuz videosunu ses suresine gore donguye alip TTS sesiyle birlestir.
+    Orijinal video sesi atilir; sure = TTS suresi.
+    Gercek dudak senkronu icin Wav2Lip modeli gerekir.
+    """
     if not _ffmpeg_ready():
         raise HTTPException(503, detail="ffmpeg bulunamadi")
     wav_path = _to_wav(audio_path, out_path.parent)
+    duration = _audio_duration_sec(wav_path)
     cmd = [
         FFMPEG,
         "-y",
+        "-stream_loop",
+        "-1",
         "-i",
         str(face_path),
         "-i",
@@ -85,18 +118,20 @@ def _run_ffmpeg_mux(face_path: Path, audio_path: Path, out_path: Path) -> None:
         "-c:a",
         "aac",
         "-b:a",
-        "128k",
+        "192k",
         "-shortest",
-        "-async",
-        "1",
+        "-fflags",
+        "+genpts",
         "-vsync",
         "cfr",
         "-pix_fmt",
         "yuv420p",
         "-movflags",
         "+faststart",
-        str(out_path),
     ]
+    if duration > 0:
+        cmd.extend(["-t", f"{duration:.3f}"])
+    cmd.append(str(out_path))
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
     if proc.returncode != 0 or not out_path.is_file():
         raise HTTPException(

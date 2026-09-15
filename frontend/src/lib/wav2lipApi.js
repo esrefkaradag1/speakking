@@ -1,7 +1,6 @@
 import axios from 'axios';
 import { getAIAPI } from '../config';
-import { getAuthHeaders } from './apiAuth';
-import { speakText } from './apiAuth';
+import { getAuthHeaders, speakText } from './apiAuth';
 
 function base64ToBlob(b64, mime) {
   const byteCharacters = atob(b64);
@@ -28,27 +27,26 @@ export async function checkWav2lipHealth() {
   }
 }
 
-/** Sadece TTS — ders sesi hemen oynatilir */
-export async function fetchTtsAudioUrl(text, lang = 'tr') {
+/** Tek TTS — insan sesi (Cartesia/Edge) */
+export async function fetchTtsAudio(text, lang = 'tr') {
   const tts = await speakText(text, lang);
   if (!tts.data?.audio) throw new Error('TTS bos dondu');
   const fmt = (tts.data.format || 'mp3').toLowerCase();
   const mime = fmt === 'wav' ? 'audio/wav' : 'audio/mpeg';
   return {
-    url: URL.createObjectURL(base64ToBlob(tts.data.audio, mime)),
+    audioBase64: tts.data.audio,
+    format: fmt,
+    mime,
     provider: tts.data.provider,
+    url: URL.createObjectURL(base64ToBlob(tts.data.audio, mime)),
   };
 }
 
-/** TTS + Wav2Lip → senkron MP4 (yavas; onizleme icin) */
-export async function synthesizeLipSyncVideo(text, lang = 'tr') {
-  const tts = await speakText(text, lang);
-  if (!tts.data?.audio) throw new Error('TTS bos dondu');
-
-  const fmt = (tts.data.format || 'mp3').toLowerCase();
+/** Ayni ses baytlariyla dudak senkron videosu uret */
+export async function synthesizeLipSyncFromAudio(audioBase64, format = 'mp3') {
   const syncRes = await axios.post(
     `${getAIAPI()}/avatar/wav2lip/sync`,
-    { audio_base64: tts.data.audio, format: fmt },
+    { audio_base64: audioBase64, format },
     { headers: await getAuthHeaders(), timeout: 320000 }
   );
 
@@ -56,5 +54,24 @@ export async function synthesizeLipSyncVideo(text, lang = 'tr') {
     throw new Error(syncRes.data?.detail || 'Wav2Lip video uretilemedi');
   }
   const blob = base64ToBlob(syncRes.data.video_base64, 'video/mp4');
-  return URL.createObjectURL(blob);
+  return {
+    url: URL.createObjectURL(blob),
+    mode: syncRes.data.mode || null,
+  };
+}
+
+/** Geriye uyumluluk: TTS + sync (iki ayri cagri yerine tek ses) */
+export async function synthesizeLipSyncVideo(text, lang = 'tr') {
+  const tts = await fetchTtsAudio(text, lang);
+  try {
+    const { url } = await synthesizeLipSyncFromAudio(tts.audioBase64, tts.format);
+    return url;
+  } finally {
+    URL.revokeObjectURL(tts.url);
+  }
+}
+
+export async function fetchTtsAudioUrl(text, lang = 'tr') {
+  const tts = await fetchTtsAudio(text, lang);
+  return { url: tts.url, provider: tts.provider };
 }

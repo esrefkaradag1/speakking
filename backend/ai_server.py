@@ -42,8 +42,8 @@ FISH_API_KEY = (os.environ.get("FISH_API_KEY") or "").strip()
 OPENAI_API_KEY = (os.environ.get("OPENAI_API_KEY") or "").strip()
 TTS_PROVIDER = (os.environ.get("TTS_PROVIDER") or "auto").lower()
 TTS_OPENAI_MODEL = os.environ.get("TTS_OPENAI_MODEL", "gpt-4o-mini-tts")
-TTS_OPENAI_VOICE_TR = os.environ.get("TTS_OPENAI_VOICE_TR", "marin")
-TTS_OPENAI_VOICE_EN = os.environ.get("TTS_OPENAI_VOICE_EN", "marin")
+TTS_OPENAI_VOICE_TR = os.environ.get("TTS_OPENAI_VOICE_TR", "Kore")
+TTS_OPENAI_VOICE_EN = os.environ.get("TTS_OPENAI_VOICE_EN", "Kore")
 TTS_SPEECH_SPEED = float(os.environ.get("TTS_SPEECH_SPEED", "1.04"))
 TTS_OPENAI_INSTRUCTIONS_TR = os.environ.get(
     "TTS_OPENAI_INSTRUCTIONS_TR",
@@ -58,7 +58,7 @@ TTS_OPENAI_INSTRUCTIONS_EN = os.environ.get(
 )
 OPENROUTER_TTS_URL = "https://openrouter.ai/api/v1/audio/speech"
 TTS_OPENROUTER_MODEL = os.environ.get(
-    "TTS_OPENROUTER_MODEL", "openai/gpt-4o-mini-tts-2025-12-15"
+    "TTS_OPENROUTER_MODEL", "google/gemini-3.1-flash-tts-preview"
 )
 DID_API_KEY = (
     os.environ.get("DID_API_KEY")
@@ -82,6 +82,9 @@ api_router = APIRouter(prefix="/api")
 class ChatMessage(BaseModel):
     message: str
     session_id: str
+    message_kind: Optional[str] = None  # answer | help
+    challenge_attempt: Optional[int] = None
+    current_challenge: Optional[str] = None
 
 
 class HintRequest(BaseModel):
@@ -526,6 +529,121 @@ def _scenario_word_build(scenario: dict) -> Optional[dict]:
     return None
 
 
+def _scenario_topic_keys(scenario: dict) -> List[str]:
+    """Senaryo basligi + topics alanindan eslesme anahtarlari."""
+    keys: List[str] = []
+    for field in ("title_tr", "title", "description_tr", "description"):
+        v = (scenario.get(field) or "").strip()
+        if v:
+            keys.append(v)
+    topics = scenario.get("topics") or []
+    if isinstance(topics, str):
+        try:
+            topics = json.loads(topics)
+        except json.JSONDecodeError:
+            topics = [topics]
+    if isinstance(topics, dict):
+        # word_build — kelimeleri de anahtar say
+        for w in topics.get("words") or []:
+            if str(w).strip():
+                keys.append(str(w).strip())
+    elif isinstance(topics, list):
+        for t in topics:
+            if isinstance(t, str) and t.strip():
+                keys.append(t.strip())
+            elif isinstance(t, dict) and t.get("lesson_type") == "word_build":
+                for w in t.get("words") or []:
+                    if str(w).strip():
+                        keys.append(str(w).strip())
+    # Tekrarları temizle, kisa olanlari at
+    seen = set()
+    out = []
+    for k in keys:
+        nk = k.strip().lower()
+        if len(nk) < 2 or nk in seen:
+            continue
+        seen.add(nk)
+        out.append(k.strip())
+    return out
+
+
+def _sentence_matches_scenario(row: dict, keys: List[str]) -> bool:
+    topic = (row.get("topic") or "").strip().lower()
+    if not topic:
+        return False
+    for k in keys:
+        kl = k.lower()
+        if kl in topic or topic in kl:
+            return True
+        # Anahtar kelime (headache, coffee) topic metninde
+        if len(kl) >= 4 and kl in topic:
+            return True
+    return False
+
+
+def _load_scenario_sentences(
+    session_level: str, scenario: dict, limit: int = 20
+) -> List[dict]:
+    """
+    Cumle bankasini once KONUYA gore filtrele, sonra seviyeye dus.
+    Boylece 'Doktorda' dersinde 'Hava Durumu' cumlesi gelmez.
+    """
+    limit = max(1, min(int(limit or 20), 50))
+    keys = _scenario_topic_keys(scenario)
+    try:
+        rows = (
+            sb.table("sentences")
+            .select("*")
+            .eq("level", session_level)
+            .limit(200)
+            .execute()
+            .data
+            or []
+        )
+    except Exception as e:
+        logger.warning("sentences load failed: %s", e)
+        rows = []
+
+    if not rows:
+        try:
+            rows = sb.table("sentences").select("*").limit(200).execute().data or []
+        except Exception:
+            rows = []
+
+    matched: List[dict] = []
+    if keys:
+        # 1) topic tam/benzer eslesme (title_tr oncelikli)
+        title_tr = (scenario.get("title_tr") or "").strip().lower()
+        title_en = (scenario.get("title") or "").strip().lower()
+        for r in rows:
+            t = (r.get("topic") or "").strip().lower()
+            if title_tr and (t == title_tr or title_tr in t or t in title_tr):
+                matched.append(r)
+            elif title_en and (t == title_en or title_en in t or t in title_en):
+                matched.append(r)
+        if not matched:
+            matched = [r for r in rows if _sentence_matches_scenario(r, keys)]
+
+    if matched:
+        random.shuffle(matched)
+        logger.info(
+            "Sentence bank topic-filtered: scenario=%s matched=%s/%s",
+            scenario.get("title_tr") or scenario.get("title"),
+            len(matched),
+            len(rows),
+        )
+        return matched[:limit]
+
+    # Konuya ozel cumle yoksa seviye bankasini verme — LLM konuya uygun uydursun
+    logger.warning(
+        "No topic sentences for scenario=%s level=%s keys=%s — empty bank",
+        scenario.get("title_tr") or scenario.get("title"),
+        session_level,
+        keys[:5],
+    )
+    return []
+
+
 def _fallback_vocabulary(level: str, scenario: dict, limit: int = 2) -> List[dict]:
     wb = _scenario_word_build(scenario)
     if wb:
@@ -533,24 +651,9 @@ def _fallback_vocabulary(level: str, scenario: dict, limit: int = 2) -> List[dic
         for w in wb["words"][:limit]:
             out.append({"word": w, "meaning": "hedef kelime", "example": f"I use {w} in a sentence."})
         return out
-    rows = sb.table("sentences").select("*").eq("level", level).limit(30).execute().data or []
+    rows = _load_scenario_sentences(level, scenario, limit=30)
     if not rows:
-        rows = sb.table("sentences").select("*").limit(30).execute().data or []
-    topics = scenario.get("topics") or []
-    if isinstance(topics, str):
-        try:
-            topics = json.loads(topics)
-        except json.JSONDecodeError:
-            topics = [topics]
-    topic_list = topics if isinstance(topics, list) else []
-    if topic_list:
-        filtered = [
-            r
-            for r in rows
-            if any(str(t).lower() in (r.get("topic") or "").lower() for t in topic_list)
-        ]
-        if filtered:
-            rows = filtered
+        rows = sb.table("sentences").select("*").eq("level", level).limit(30).execute().data or []
     random.shuffle(rows)
     out = []
     for r in rows[:limit]:
@@ -704,8 +807,11 @@ CUSTOM LESSON — WORD BUILDING (teacher-defined):
 LESSON FORMAT (every turn):
 1) Give a Turkish sentence in quotes for the student to translate OUT LOUD into English.
 2) Student speaks English (microphone). You judge right/wrong in Turkish.
-3) If wrong or incomplete, briefly say so in Turkish, then read the correct English once.
-4) Then give the NEXT Turkish sentence to translate.
+3) If wrong or incomplete on FIRST attempt (challenge_attempt is 1): stay on the SAME Turkish sentence.
+   - Brief Turkish feedback in [SAY_TR]. Give a hint: first TWO words of the correct English answer in [SAY_EN], then ask to try again in [SAY_TR].
+   - Do NOT give the next Turkish sentence yet. Do NOT use [CORRECTION] block on first attempt.
+4) If wrong again on SECOND attempt (challenge_attempt >= 2): use [CORRECTION], then [SAY_TR] "Doğrusunu dinleyelim:", [SAY_EN] full correct English, then next [SAY_TR] challenge.
+5) If correct: praise briefly, then give the NEXT Turkish sentence.
 
 OUTPUT FORMAT (required — system reads aloud using these tags):
 - Turkish instructions + Turkish sentence to translate:
@@ -733,10 +839,13 @@ RULES:
 - [SAY_TR] = Turkish ONLY. NEVER include any English words, letters, or phrases inside [SAY_TR], because the Turkish text-to-speech engine will mispronounce them.
 - [SAY_EN] = ONLY the model English answer (one short sentence). Never put Turkish inside [SAY_EN].
 - CRITICAL: Every English model/corrected sentence MUST be inside its own [SAY_EN]...[/SAY_EN] block.
-- On FIRST message: welcome in Turkish, then first [SAY_TR] with one sentence from the topic.
-- When student sends English: evaluate in Turkish in [SAY_TR], then [SAY_EN] if correction needed, then next [SAY_TR] challenge.
+- On FIRST message: welcome in Turkish naming the EXACT topic ({title}), then first [SAY_TR] with one sentence FROM THIS TOPIC ONLY.
+- When student sends English: evaluate in Turkish in [SAY_TR]; follow attempt rules for [SAY_EN] and [CORRECTION]; then next [SAY_TR] challenge when appropriate.
 - Level {session_level}: simple sentences for A1/A2.
 - Topic: {title} — {desc}. Tone: {tone}. Student: {user_name}.
+- CRITICAL TOPIC LOCK: Every Turkish challenge MUST be about "{title}" only. NEVER use sentences from other topics (weather, family, hobbies, daily routine, etc.) unless this lesson IS that topic.
+- If SENTENCE BANK is provided below, ONLY use those TR→EN pairs (or close paraphrases of them). Do not invent off-topic sentences.
+- If SENTENCE BANK is empty, invent simple on-topic Turkish sentences for "{title}" yourself.
 
 VOCABULARY PANEL (required every response — 1 or 2 items, shown in UI, NOT in [SAY_TR]/[SAY_EN]):
 [VOCABULARY]{{"word":"brush","meaning":"fırçalamak","example":"I brush my teeth every day."}}[/VOCABULARY]
@@ -744,29 +853,45 @@ VOCABULARY PANEL (required every response — 1 or 2 items, shown in UI, NOT in 
 - Pick useful English words/phrases from the current Turkish sentence or topic.
 - ALWAYS include at least one [VOCABULARY] block per response.
 
-CORRECTION (REQUIRED when student answer is wrong or incomplete):
+CORRECTION (only on SECOND wrong attempt — challenge_attempt >= 2):
 [CORRECTION]{{"original":"student attempt","correction":"correct English","explanation":"kisa Turkce aciklama","turkish":"verilen Turkce cumle"}}[/CORRECTION]
-- After any correction you MUST still give the NEXT Turkish challenge in [SAY_TR] in the same response.
+- On first wrong attempt (challenge_attempt=1): NO [CORRECTION] — hint only with first two English words in [SAY_EN], same Turkish challenge.
+- On second wrong attempt: [CORRECTION] then [SAY_TR] doğrusunu dinleyelim, [SAY_EN] full sentence, then [SAY_TR] NEXT challenge.
 
 MICROPHONE / INPUT:
 - The app sends the student's spoken English as text. NEVER say you cannot hear the microphone.
 - NEVER ask the student to type instead of speak. NEVER mention being an AI that cannot hear audio.
 - Treat every English message as the student's spoken answer.
+- If message_kind is "help" OR the student writes in Turkish asking for help (yardım, yapamadım, anlamadım): respond in Turkish only, encourage them, repeat the same challenge — do NOT score it as a wrong translation.
+- If the student mixes Turkish and English, evaluate ONLY the English part as their answer.
+- NEVER transliterate Turkish into fake English phonetics.
 
-AFTER WRONG ANSWER:
-- Brief Turkish feedback in [SAY_TR], [SAY_EN] with correct English, then immediately [SAY_TR] with the NEXT sentence to translate.
+AFTER WRONG ANSWER (challenge_attempt=1):
+- Same Turkish sentence. Hint with first two English words in [SAY_EN]. No [CORRECTION] yet.
+
+AFTER WRONG ANSWER (challenge_attempt>=2):
+- [CORRECTION] block, [SAY_TR] doğrusunu dinleyelim, [SAY_EN] full model sentence, then [SAY_TR] NEXT sentence.
 """
     if ai.get("system_prompt"):
         base += f"\nADMIN:\n{ai['system_prompt']}\n"
     if ai.get("custom_instructions"):
         base += f"\nCUSTOM TEACHING NOTES:\n{ai['custom_instructions']}\n"
     if ai.get("use_sentence_bank", True) and not wb:
-        q = sb.table("sentences").select("*").eq("level", session_level).limit(ai.get("max_sentences_per_lesson", 10))
-        rows = q.execute().data or []
+        rows = _load_scenario_sentences(
+            session_level,
+            scenario,
+            limit=ai.get("max_sentences_per_lesson", 10),
+        )
         if rows:
-            base += "\nSENTENCE BANK:\n"
+            topic_label = scenario.get("title_tr") or scenario.get("title") or title
+            base += f"\nSENTENCE BANK (topic locked: {topic_label} — use ONLY these):\n"
             for i, s in enumerate(rows, 1):
                 base += f"{i}. TR: {s['turkish']} -> EN: {s['english']}\n"
+        else:
+            base += (
+                f"\nSENTENCE BANK: (empty for this topic) — invent {session_level} "
+                f"Turkish sentences ONLY about: {title}\n"
+            )
     if ai.get("use_documents", True):
         docs = sb.table("documents").select("text_content").limit(5).execute().data or []
         texts = "\n".join(d.get("text_content", "")[:2000] for d in docs if d.get("text_content"))
@@ -793,23 +918,25 @@ Merhaba {user_name}! {title} — kelime ile cümle kurma pratiğine başlıyoruz
 {wstr}{note_block}
 [/SAY_TR]
 [VOCABULARY]{{"word":"{first}","meaning":"hedef kelime","example":"Use {first} in your sentence."}}[/VOCABULARY]"""
-    rows = (
-        sb.table("sentences")
-        .select("turkish,english")
-        .eq("level", session_level)
-        .limit(30)
-        .execute()
-        .data
-        or []
-    )
+    rows = _load_scenario_sentences(session_level, scenario, limit=30)
     if not rows:
-        return None
+        return f"""[SAY_TR]
+Merhaba {user_name}! {title} konusunda pratiğe başlıyoruz.
+
+Bu konuyla ilgili kısa bir Türkçe cümleyi İngilizceye çevirmeye hazır mısın? İlk cümleyi şimdi veriyorum — dinle ve İngilizce söyle.
+[/SAY_TR]
+[SAY_TR]
+Şu cümleyi İngilizceye çevir:
+
+"Bu konuda pratik yapmak istiyorum."
+[/SAY_TR]
+[VOCABULARY]{{"word":"practice","meaning":"pratik","example":"I want to practice this topic."}}[/VOCABULARY]"""
     pick = random.choice(rows)
     tr = (pick.get("turkish") or "").strip()
     if not tr:
         return None
     return f"""[SAY_TR]
-Merhaba {user_name}! {title} konusunda pratige basliyoruz.
+Merhaba {user_name}! {title} konusunda pratiğe başlıyoruz.
 
 Şu cümleyi İngilizceye çevir:
 
@@ -819,6 +946,9 @@ Merhaba {user_name}! {title} konusunda pratige basliyoruz.
 
 
 async def openrouter_chat(messages: list) -> str:
+    if not OPENROUTER_API_KEY:
+        raise HTTPException(503, detail="OPENROUTER_API_KEY tanimli degil")
+    model = (os.environ.get("OPENROUTER_CHAT_MODEL") or "google/gemini-2.5-flash").strip()
     async with httpx.AsyncClient() as client:
         resp = await client.post(
             "https://openrouter.ai/api/v1/chat/completions",
@@ -827,11 +957,32 @@ async def openrouter_chat(messages: list) -> str:
                 "HTTP-Referer": os.environ.get("APP_URL", "https://speakking.edulim.net"),
                 "X-Title": "Speakking",
             },
-            json={"model": "google/gemini-2.5-flash", "messages": messages},
+            json={"model": model, "messages": messages},
             timeout=60.0,
         )
-        resp.raise_for_status()
+        if resp.status_code == 402:
+            raise HTTPException(
+                402,
+                detail="OpenRouter kredisi bitti. openrouter.ai hesabina bakiye yukleyin veya ilk mesajla devam edin.",
+            )
+        if resp.status_code >= 400:
+            logger.error("OpenRouter %s: %s", resp.status_code, resp.text[:300])
+            raise HTTPException(502, detail=f"AI servisi yanit vermedi ({resp.status_code})")
         return resp.json()["choices"][0]["message"]["content"]
+
+
+def _offline_chat_fallback(session_level: str, scenario: dict, user_name: str, message: str) -> str:
+    """OpenRouter yokken veya hata verdiginde yapisal cevap."""
+    welcome = _first_turn_welcome(session_level, scenario, user_name)
+    if welcome:
+        return welcome
+    title = scenario.get("title_tr") or scenario.get("title") or "ders"
+    return f"""[SAY_TR]
+Tamam {user_name}! {title} konusunda devam edelim.
+
+"{message}" — lutfen bunu Ingilizceye cevirmeyi dene.
+[/SAY_TR]
+[VOCABULARY]{{"word":"practice","meaning":"pratik","example":"Let's practice together."}}[/VOCABULARY]"""
 
 
 def _strip_tts_markup(text: str) -> str:
@@ -945,16 +1096,23 @@ def _effective_tts_speed(admin_speed: float) -> float:
 
 def _speech_api_payload(text: str, speed: float, lang: str, model: str) -> Dict[str, Any]:
     voice = TTS_OPENAI_VOICE_TR if lang == "tr" else TTS_OPENAI_VOICE_EN
+    # Model-ozel varsayilan kadin sesleri
+    if "gemini" in model and not voice:
+        voice = "Kore"
+    if "kokoro" in model:
+        voice = "af_nova" if lang == "en" else (voice or "af_bella")
+    if "aura-2" in model:
+        voice = "aura-2-thalia-en"
     instructions = TTS_OPENAI_INSTRUCTIONS_TR if lang == "tr" else TTS_OPENAI_INSTRUCTIONS_EN
     payload: Dict[str, Any] = {
         "model": model,
         "input": text,
-        "voice": voice,
-        "speed": _effective_tts_speed(speed),
+        "voice": voice or "Kore",
         "response_format": "mp3",
     }
-    if lang == "tr":
-        payload["language_code"] = "tr"
+    # speed sadece bazi saglayicilarda
+    if "gpt-4o-mini-tts" in model or "openai/" in model:
+        payload["speed"] = _effective_tts_speed(speed)
     if "gpt-4o-mini-tts" in model and instructions:
         payload["instructions"] = instructions
     return payload
@@ -1032,8 +1190,9 @@ import asyncio
 cartesia_semaphore = asyncio.Semaphore(2)
 
 def _cartesia_enabled(settings: Dict) -> bool:
-    # Always enabled as requested by user
-    return True
+    admin_on = settings.get("use_cartesia") in (True, "true", "t", 1, "1")
+    env_on = os.environ.get("TTS_USE_CARTESIA", "false").lower() in ("1", "true", "yes", "on")
+    return bool(admin_on or env_on)
 
 async def synthesize_cartesia_tts(text: str, api_key: str, voice_id: str, lang: str) -> Optional[bytes]:
     url = "https://api.cartesia.ai/tts/bytes"
@@ -1087,8 +1246,43 @@ async def synthesize_speech(
         (settings.get("elevenlabs_voice_id") or "").strip() or ELEVENLABS_DEFAULT_VOICE_ID
     )
     
-    cartesia_key = "sk_car_rnTaKhDMpvj3UYLd8szTPB"
-    cartesia_voice_id = "db6b0ed5-d5d3-463d-ae85-518a07d3c2b4"
+    cartesia_key = (
+        (settings.get("cartesia_api_key") or "").strip()
+        or (os.environ.get("CARTESIA_API_KEY") or "").strip()
+    )
+    cartesia_voice_id = (
+        (settings.get("cartesia_voice_id") or "").strip()
+        or (os.environ.get("CARTESIA_VOICE_ID") or "").strip()
+        or "db6b0ed5-d5d3-463d-ae85-518a07d3c2b4"
+    )
+
+    # OpenRouter — sadece kadin kilit kapaliysa veya Edge basarisizsa
+    prefer_or = (
+        TTS_PROVIDER == "openrouter"
+        or os.environ.get("TTS_PREFER_OPENROUTER", "false").lower()
+        in ("1", "true", "yes", "on")
+    )
+    lock_female = os.environ.get("TTS_LOCK_FEMALE", "true").lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+    # Once tutarli kadin Edge (oturum boyu ayni ses)
+    if lock_female:
+        try:
+            audio = await synthesize_edge_tts(spoken, speed, lang=lang)
+            if audio:
+                logger.info("TTS Edge (kadin kilit) %s: %s", lang, spoken[:80])
+                return audio, "edge"
+        except Exception as e:
+            logger.warning("Edge TTS failed: %s", e)
+
+    if prefer_or:
+        hit = await _try_openrouter_tts(spoken, speed, lang)
+        if hit:
+            return hit
 
     if cartesia_key and _cartesia_enabled(settings):
         try:
@@ -1098,6 +1292,15 @@ async def synthesize_speech(
                 return audio, "cartesia"
         except Exception as e:
             logger.warning("Cartesia TTS failed: %s", e)
+
+    # Edge — tutarli kadin sesi
+    try:
+        audio = await synthesize_edge_tts(spoken, speed, lang=lang)
+        if audio:
+            logger.info("TTS Edge (oncelikli) %s: %s", lang, spoken[:80])
+            return audio, "edge"
+    except Exception as e:
+        logger.warning("Edge TTS failed, fallback: %s", e)
 
     prefer_edge_tr = os.environ.get("TTS_PREFER_EDGE_TR", "false").lower() in (
         "1",
@@ -1264,6 +1467,7 @@ async def wav2lip_sync_endpoint(body: Wav2LipSyncIn, user: Dict = Depends(get_cu
     return {
         "success": True,
         "format": "mp4",
+        "mode": "wav2lip",
         "video_base64": base64.b64encode(video_bytes).decode("ascii"),
     }
 
@@ -1271,6 +1475,35 @@ async def wav2lip_sync_endpoint(body: Wav2LipSyncIn, user: Dict = Depends(get_cu
 @api_router.get("/health")
 async def health():
     return {"status": "ok", "service": "Speakking AI", "database": "supabase"}
+
+
+def _enrich_user_message(chat_data: ChatMessage) -> str:
+    """Oturum baglami: yardim / deneme sayisi / mevcut soru."""
+    base = (chat_data.message or "").strip()
+    if not base:
+        return base
+    meta: List[str] = []
+    if chat_data.message_kind == "help":
+        meta.append(
+            "[STUDENT_REQUEST: HELP in Turkish — encourage, repeat the SAME Turkish challenge; "
+            "do NOT grade as a wrong translation; do NOT invent English phonetics for Turkish words]"
+        )
+    elif chat_data.message_kind == "answer":
+        if chat_data.current_challenge:
+            meta.append(f"[CURRENT_CHALLENGE_TR: {chat_data.current_challenge}]")
+        attempt = chat_data.challenge_attempt or 1
+        meta.append(f"[CHALLENGE_ATTEMPT: {attempt}]")
+        if attempt == 1:
+            meta.append(
+                "[If wrong: stay on same Turkish sentence, hint with first TWO English words only — no CORRECTION]"
+            )
+        elif attempt >= 2:
+            meta.append(
+                "[If wrong: use CORRECTION block, then doğrusunu dinleyelim + full [SAY_EN], then NEXT challenge]"
+            )
+    if not meta:
+        return base
+    return base + "\n\n" + "\n".join(meta)
 
 
 @api_router.post("/chat")
@@ -1309,13 +1542,13 @@ async def chat_with_ai(chat_data: ChatMessage, user: Dict = Depends(get_current_
             messages.append({"role": "assistant", "content": entry["ai_raw"]})
         elif entry.get("ai"):
             messages.append({"role": "assistant", "content": entry["ai"]})
-    messages.append({"role": "user", "content": chat_data.message})
+    messages.append({"role": "user", "content": _enrich_user_message(chat_data)})
 
     transcript = session.get("transcript") or []
     msg_lower = (chat_data.message or "").lower()
     is_greeting = any(
         k in msg_lower
-        for k in ("merhaba", "hazir", "hazır", "basla", "başla", "pratik", "hello", "hi")
+        for k in ("merhaba", "hazir", "hazır", "pratig", "basla", "başla", "pratik", "hello", "hi")
     )
     raw = None
     if not transcript and is_greeting:
@@ -1323,7 +1556,13 @@ async def chat_with_ai(chat_data: ChatMessage, user: Dict = Depends(get_current_
             session.get("level", "A1"), scenario, user.get("name", "User")
         )
     if not raw:
-        raw = await openrouter_chat(messages)
+        try:
+            raw = await openrouter_chat(messages)
+        except HTTPException as exc:
+            logger.warning("OpenRouter atlandi (%s), offline fallback kullaniliyor", exc.detail)
+            raw = _offline_chat_fallback(
+                session.get("level", "A1"), scenario, user.get("name", "User"), chat_data.message
+            )
     parsed = parse_structured_response(raw)
     parsed["vocabulary"] = enrich_vocabulary(
         parsed.get("vocabulary") or [],
@@ -1367,15 +1606,18 @@ async def chat_with_ai(chat_data: ChatMessage, user: Dict = Depends(get_current_
 @api_router.post("/hint/translate")
 async def hint_translate(request: HintRequest, user: Dict = Depends(get_current_user)):
     prompt = f"Translate to English (level {request.level}): {request.turkish_sentence}"
-    raw = await openrouter_chat(
-        [
-            {
-                "role": "system",
-                "content": "Translate Turkish to English. Reply with only the English translation.",
-            },
-            {"role": "user", "content": prompt},
-        ]
-    )
+    try:
+        raw = await openrouter_chat(
+            [
+                {
+                    "role": "system",
+                    "content": "Translate Turkish to English. Reply with only the English translation.",
+                },
+                {"role": "user", "content": prompt},
+            ]
+        )
+    except HTTPException:
+        return {"translation": "", "success": False}
     return {"translation": raw.strip().strip('"').strip("'"), "success": True}
 
 
@@ -1420,14 +1662,16 @@ async def voice_speak(
         raise HTTPException(500, detail="TTS failed")
 
 
-def _did_headers(extra: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+def _did_headers(extra: Optional[Dict[str, str]] = None, json_body: bool = True) -> Dict[str, str]:
     if not DID_API_KEY:
         raise HTTPException(503, detail="D-ID API key not configured")
     if ":" in DID_API_KEY or "@" in DID_API_KEY:
         token = base64.b64encode(DID_API_KEY.encode()).decode()
     else:
         token = DID_API_KEY
-    headers = {"Authorization": f"Basic {token}", "Content-Type": "application/json"}
+    headers = {"Authorization": f"Basic {token}"}
+    if json_body:
+        headers["Content-Type"] = "application/json"
     eleven = (os.environ.get("ELEVENLABS_API_KEY") or "").strip()
     if eleven:
         headers["x-api-key-external"] = json.dumps({"elevenlabs": eleven})
@@ -1436,17 +1680,133 @@ def _did_headers(extra: Optional[Dict[str, str]] = None) -> Dict[str, str]:
     return headers
 
 
+_DID_PHOTO_URL_CACHE: Optional[str] = None
+
+
+def _teacher_photo_path() -> Path:
+    root = Path(__file__).resolve().parent.parent
+    env_path = (os.environ.get("DID_FACE_IMAGE") or "").strip()
+    candidates = [
+        Path(env_path) if env_path else None,
+        root / "frontend" / "public" / "teacher.png",
+        root / "frontend" / "build" / "teacher.png",
+    ]
+    for p in candidates:
+        if p and p.is_file():
+            return p
+    raise FileNotFoundError("teacher.png bulunamadi (frontend/public/teacher.png)")
+
+
+@api_router.get("/avatar/photo-source")
+async def did_photo_source(user: Dict = Depends(get_current_user)):
+    """teacher.png dosyasini D-ID'ye yukler; dudak senkronu icin public URL doner."""
+    global _DID_PHOTO_URL_CACHE
+    if _DID_PHOTO_URL_CACHE:
+        return {"success": True, "source_url": _DID_PHOTO_URL_CACHE, "cached": True}
+
+    photo = _teacher_photo_path()
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        with open(photo, "rb") as f:
+            files = {"image": (photo.name, f, "image/png")}
+            r = await client.post(
+                f"{DID_API_BASE}/images",
+                headers=_did_headers(json_body=False),
+                files=files,
+            )
+    if r.status_code >= 400:
+        logger.error("D-ID image upload failed: %s", r.text[:400])
+        raise HTTPException(r.status_code, detail=r.text)
+    data = r.json()
+    url = data.get("url") or data.get("source_url")
+    if not url:
+        raise HTTPException(502, detail="D-ID image URL donmedi")
+    _DID_PHOTO_URL_CACHE = url
+    return {"success": True, "source_url": url, "cached": False}
+
+
+class DidTalkCreate(BaseModel):
+    text: str
+    lang: str = "tr"
+    source_url: Optional[str] = None
+
+
+@api_router.post("/avatar/talk")
+async def did_create_talk(body: DidTalkCreate, user: Dict = Depends(get_current_user)):
+    """
+    Sabit gorsel + sohbet metni → dudak senkronlu video (Talks API).
+    Videodaki orijinal ses kullanilmaz; metin birebir okunur.
+    """
+    global _DID_PHOTO_URL_CACHE
+    text = (body.text or "").strip()
+    if not text:
+        raise HTTPException(400, detail="text gerekli")
+
+    source_url = (body.source_url or "").strip() or _DID_PHOTO_URL_CACHE
+    if not source_url:
+        src = await did_photo_source(user)
+        source_url = src["source_url"]
+
+    lang = body.lang if body.lang in ("en", "tr") else "tr"
+    if lang == "tr":
+        script = {
+            "type": "text",
+            "input": text,
+            "provider": {"type": "microsoft", "voice_id": "tr-TR-EmelNeural"},
+        }
+    else:
+        script = {
+            "type": "text",
+            "input": text,
+            "provider": {
+                "type": "microsoft",
+                "voice_id": "en-US-JennyNeural",
+            },
+        }
+
+    payload = {
+        "source_url": source_url,
+        "script": script,
+        "config": {"stitch": True, "fluent": True, "pad_audio": 0.0},
+    }
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        r = await client.post(
+            f"{DID_API_BASE}/talks",
+            headers=_did_headers(),
+            json=payload,
+        )
+    if r.status_code >= 400:
+        logger.error("D-ID talk create failed: %s", r.text[:500])
+        raise HTTPException(r.status_code, detail=r.text)
+    return r.json()
+
+
+@api_router.get("/avatar/talk/{talk_id}")
+async def did_get_talk(talk_id: str, user: Dict = Depends(get_current_user)):
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        r = await client.get(
+            f"{DID_API_BASE}/talks/{talk_id}",
+            headers=_did_headers(),
+        )
+    if r.status_code >= 400:
+        raise HTTPException(r.status_code, detail=r.text)
+    return r.json()
+
+
 class DidStreamCreate(BaseModel):
     source_url: str
 
 
 @api_router.post("/avatar/stream")
 async def did_create_stream(body: DidStreamCreate, user: Dict = Depends(get_current_user)):
+    source_url = (body.source_url or "").strip()
+    if not source_url or source_url.startswith("/") or "localhost" in source_url:
+        src = await did_photo_source(user)
+        source_url = src["source_url"]
     async with httpx.AsyncClient(timeout=60.0) as client:
         r = await client.post(
             f"{DID_API_BASE}/talks/streams",
             headers=_did_headers(),
-            json={"source_url": body.source_url},
+            json={"source_url": source_url},
         )
     if r.status_code >= 400:
         raise HTTPException(r.status_code, detail=r.text)
@@ -1505,10 +1865,16 @@ async def did_stream_delete(stream_id: str, payload: Dict[str, Any] = Body(defau
     return {"ok": True}
 
 
+def _cors_origins() -> List[str]:
+    raw = os.environ.get("CORS_ORIGINS", "http://localhost:3000")
+    origins = [o.strip() for o in raw.split(",") if o.strip() and o.strip() != "*"]
+    return origins or ["http://localhost:3000"]
+
+
 app.include_router(api_router)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","),
+    allow_origins=_cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
