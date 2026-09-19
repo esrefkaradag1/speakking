@@ -8,7 +8,7 @@ import {
   ArrowLeft, Users, BookOpen, Clock, Activity,
   Plus, Trash2, Save, Settings, X, GraduationCap,
   FileText, Brain, Upload, Download, Search, Filter, ChevronDown,
-  RotateCcw, Bot, MessageSquare, CheckCircle2, AlertCircle, Send, RefreshCw
+  RotateCcw, Bot, MessageSquare, CheckCircle2, AlertCircle, Send, RefreshCw, CreditCard
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -35,6 +35,7 @@ import * as adminApi from '../lib/adminApi';
 import * as curriculumApi from '../lib/curriculumApi';
 import { categoryColors, normalizeCategoryCode } from '../lib/curriculumLevels';
 import { moduleDisplayName } from '../lib/curriculumApi';
+import PackageManager from '../components/PackageManager';
 import {
   buildWordBuildTopics,
   defaultCustomLessonForm,
@@ -1467,6 +1468,9 @@ export default function AdminDashboard() {
               <Brain className="w-4 h-4 mr-2" />AI Egitimi
             </TabsTrigger>
             <TabsTrigger value="users" data-testid="users-tab">Kullanicilar</TabsTrigger>
+            <TabsTrigger value="packages" data-testid="packages-tab">
+              <CreditCard className="w-4 h-4 mr-2" />Paketler
+            </TabsTrigger>
             <TabsTrigger value="settings" data-testid="settings-tab">Ayarlar</TabsTrigger>
           </TabsList>
 
@@ -1934,6 +1938,10 @@ export default function AdminDashboard() {
           </TabsContent>
 
           {/* Settings Tab */}
+          <TabsContent value="packages">
+            <PackageManager />
+          </TabsContent>
+
           <TabsContent value="settings">
             <div className="glass p-6 max-w-2xl">
               <h2 className="text-xl font-heading font-medium text-white mb-6 flex items-center gap-2">

@@ -1,81 +1,45 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, CreditCard, Check, Clock, Plus } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { toast } from 'sonner';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
-
-/** Musteri paket listesi — TL/dk birim ucret ile */
-const PLANS = [
-  {
-    id: 'week-15',
-    name: 'Haftalık Paket',
-    dailyMinutes: 15,
-    price: 980,
-    perMin: '9,33 TL/dk',
-    period: '7 gün',
-    features: ['Günlük 15 dk pratik', 'A1–B1 müfredat', 'Video avatar'],
-  },
-  {
-    id: 'week-30',
-    name: 'Haftalık Paket',
-    dailyMinutes: 30,
-    price: 1480,
-    perMin: '7,04 TL/dk',
-    period: '7 gün',
-    features: ['Günlük 30 dk pratik', 'Tüm seviyeler', 'Video avatar'],
-    highlight: true,
-  },
-  {
-    id: 'month-15',
-    name: 'Aylık Paket',
-    dailyMinutes: 15,
-    price: 1980,
-    perMin: '4,40 TL/dk',
-    period: '30 gün',
-    features: ['Günlük 15 dk pratik', 'A1–B2 müfredat', 'Öncelikli destek'],
-  },
-  {
-    id: 'month-30',
-    name: 'Aylık Paket',
-    dailyMinutes: 30,
-    price: 2480,
-    perMin: '2,75 TL/dk',
-    period: '30 gün',
-    features: ['Günlük 30 dk pratik', 'Tüm seviyeler', 'Öncelikli destek'],
-  },
-  {
-    id: 'year-15',
-    name: 'Yıllık Paket',
-    dailyMinutes: 15,
-    price: 6880,
-    perMin: '1,25 TL/dk',
-    period: '365 gün',
-    features: ['Günlük 15 dk pratik', 'Tüm seviyeler', 'En avantajlı birim'],
-  },
-  {
-    id: 'year-30',
-    name: 'Yıllık Paket',
-    dailyMinutes: 30,
-    price: 8880,
-    perMin: '0,81 TL/dk',
-    period: '365 gün',
-    features: ['Günlük 30 dk pratik', 'Tüm seviyeler', 'En düşük TL/dk'],
-  },
-];
-
-/** Ayni gun ekstra sure — kota dolunca */
-const ADDONS = [
-  { id: 'addon-30', minutes: 30, price: 120, label: '+30 dk (bugün)' },
-  { id: 'addon-60', minutes: 60, price: 200, label: '+1 saat (bugün)' },
-];
+import { getActivePackages } from '../lib/packagesApi';
 
 export default function PaymentPage() {
   const navigate = useNavigate();
   const { user, refreshUser } = useAuth() || {};
-  const [selected, setSelected] = useState('week-30');
+  const [plans, setPlans] = useState([]);
+  const [addons, setAddons] = useState([]);
+  const [selected, setSelected] = useState('');
   const [buying, setBuying] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const all = await getActivePackages();
+        if (cancelled) return;
+        const subs = all.filter((p) => p.package_type !== 'addon');
+        const adds = all.filter((p) => p.package_type === 'addon');
+        setPlans(subs);
+        setAddons(adds);
+        const preferred =
+          subs.find((p) => p.highlight)?.code || subs[0]?.code || '';
+        setSelected(preferred);
+      } catch (err) {
+        console.error(err);
+        toast.error('Paketler yuklenemedi');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const applyDailyBoost = async (extraMinutes) => {
     if (!user?.id || !supabase) {
@@ -107,10 +71,8 @@ export default function PaymentPage() {
   };
 
   const checkout = async () => {
-    const plan = PLANS.find((p) => p.id === selected);
+    const plan = plans.find((p) => p.code === selected);
     if (!plan) return;
-    // Birden fazla paket: limitle ust uste binmez — gunluk dakikayi secilen pakete ceker
-    // (Stripe gelince siparis kaydi tutulacak; simdi profil limiti guncellenir)
     if (!user?.id || !supabase) {
       toast.info('Ödeme için giriş yapın. Stripe yakında bağlanacak.', { duration: 5000 });
       return;
@@ -119,12 +81,12 @@ export default function PaymentPage() {
     try {
       const { error } = await supabase
         .from('profiles')
-        .update({ daily_limit_minutes: plan.dailyMinutes })
+        .update({ daily_limit_minutes: plan.daily_minutes })
         .eq('id', user.id);
       if (error) throw error;
       await refreshUser?.();
       toast.success(
-        `${plan.name} (${plan.dailyMinutes} dk/gün) aktifleştirildi. Birden fazla paket alabilirsiniz.`,
+        `${plan.name} (${plan.daily_minutes} dk/gün) aktifleştirildi. Birden fazla paket alabilirsiniz.`,
         { duration: 5000 }
       );
     } catch (err) {
@@ -156,69 +118,78 @@ export default function PaymentPage() {
         </p>
 
         <h2 className="text-sm font-bold uppercase tracking-wider text-slate-500 mb-4">Paketler</h2>
-        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-12">
-          {PLANS.map((plan) => (
-            <button
-              key={plan.id}
-              type="button"
-              onClick={() => setSelected(plan.id)}
-              className={`text-left rounded-2xl border p-5 transition-all ${
-                selected === plan.id
-                  ? 'border-indigo-500 bg-indigo-500/10'
-                  : 'border-white/10 bg-white/5 hover:border-white/20'
-              } ${plan.highlight ? 'ring-1 ring-indigo-400/40' : ''}`}
-            >
-              <h3 className="text-base font-medium mb-0.5">{plan.name}</h3>
-              <p className="text-xs text-slate-500 mb-2">
-                Günlük {plan.dailyMinutes} dk · {plan.period}
-              </p>
-              <p className="text-2xl font-bold text-indigo-300">
-                {plan.price.toLocaleString('tr-TR')} TL
-              </p>
-              <p className="text-xs text-emerald-400/90 mt-1 mb-3">{plan.perMin}</p>
-              <ul className="space-y-1.5">
-                {plan.features.map((f) => (
-                  <li key={f} className="flex items-start gap-2 text-sm text-slate-300">
-                    <Check className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                    {f}
-                  </li>
-                ))}
-              </ul>
-            </button>
-          ))}
-        </div>
+        {loading ? (
+          <p className="text-slate-500 mb-12">Paketler yükleniyor…</p>
+        ) : (
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-12">
+            {plans.map((plan) => (
+              <button
+                key={plan.code}
+                type="button"
+                onClick={() => setSelected(plan.code)}
+                className={`text-left rounded-2xl border p-5 transition-all ${
+                  selected === plan.code
+                    ? 'border-indigo-500 bg-indigo-500/10'
+                    : 'border-white/10 bg-white/5 hover:border-white/20'
+                } ${plan.highlight ? 'ring-1 ring-indigo-400/40' : ''}`}
+              >
+                <h3 className="text-base font-medium mb-0.5">{plan.name}</h3>
+                <p className="text-xs text-slate-500 mb-2">
+                  Günlük {plan.daily_minutes} dk
+                  {plan.period_label ? ` · ${plan.period_label}` : ''}
+                </p>
+                <p className="text-2xl font-bold text-indigo-300">
+                  {Number(plan.price_tl).toLocaleString('tr-TR')} TL
+                </p>
+                {plan.per_min_label && (
+                  <p className="text-xs text-emerald-400/90 mt-1 mb-3">{plan.per_min_label}</p>
+                )}
+                <ul className="space-y-1.5 mt-3">
+                  {(plan.features || []).map((f) => (
+                    <li key={f} className="flex items-start gap-2 text-sm text-slate-300">
+                      <Check className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                      {f}
+                    </li>
+                  ))}
+                </ul>
+              </button>
+            ))}
+          </div>
+        )}
 
         <Button
           onClick={checkout}
-          disabled={buying}
+          disabled={buying || !selected}
           className="bg-indigo-600 hover:bg-indigo-500 rounded-full px-8 mb-14"
         >
           Seçili paketi satınal / yenile
         </Button>
 
-        <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-6">
-          <div className="flex items-center gap-2 mb-2">
-            <Clock className="w-5 h-5 text-amber-400" />
-            <h2 className="text-lg font-medium">Bugüne özel ekstra süre</h2>
+        {addons.length > 0 && (
+          <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-6">
+            <div className="flex items-center gap-2 mb-2">
+              <Clock className="w-5 h-5 text-amber-400" />
+              <h2 className="text-lg font-medium">Bugüne özel ekstra süre</h2>
+            </div>
+            <p className="text-sm text-slate-400 mb-4">
+              Günlük kotanız bitti ama devam etmek istiyorsanız ekstra süre ekleyin.
+            </p>
+            <div className="flex flex-wrap gap-3">
+              {addons.map((a) => (
+                <Button
+                  key={a.code}
+                  type="button"
+                  disabled={buying}
+                  onClick={() => applyDailyBoost(a.daily_minutes)}
+                  className="bg-amber-600 hover:bg-amber-500 rounded-full"
+                >
+                  <Plus className="w-4 h-4 mr-1" />
+                  {a.name} — {Number(a.price_tl).toLocaleString('tr-TR')} TL
+                </Button>
+              ))}
+            </div>
           </div>
-          <p className="text-sm text-slate-400 mb-4">
-            Günlük kotanız bitti ama devam etmek istiyorsanız +30 dk veya +1 saat ekleyin.
-          </p>
-          <div className="flex flex-wrap gap-3">
-            {ADDONS.map((a) => (
-              <Button
-                key={a.id}
-                type="button"
-                disabled={buying}
-                onClick={() => applyDailyBoost(a.minutes)}
-                className="bg-amber-600 hover:bg-amber-500 rounded-full"
-              >
-                <Plus className="w-4 h-4 mr-1" />
-                {a.label} — {a.price} TL
-              </Button>
-            ))}
-          </div>
-        </div>
+        )}
       </div>
     </div>
   );
