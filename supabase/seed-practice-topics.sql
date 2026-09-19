@@ -77,10 +77,12 @@ select v.tr, v.en, v.lvl, v.topic from (values
   ('Kendimi iyi hissetmiyorum.', 'I do not feel well.', 'A1', 'Doktorda'),
   ('İlaç almam gerekiyor.', 'I need to take medicine.', 'A1', 'Doktorda'),
   ('Boğazım ağrıyor.', 'I have a sore throat.', 'A1', 'Doktorda'),
-  ('Her sabah kahvaltı yaparım.', 'I have breakfast every morning.', 'A1', 'Günlük Rutin'),
-  ('İşe saat dokuzda giderim.', 'I go to work at nine.', 'A1', 'Günlük Rutin'),
   ('Adım Ayşe.', 'My name is Ayşe.', 'A1', 'Selamlaşma ve Tanışma'),
-  ('Tanıştığımıza memnun oldum.', 'Nice to meet you.', 'A1', 'Selamlaşma ve Tanışma')
+  ('Tanıştığımıza memnun oldum.', 'Nice to meet you.', 'A1', 'Selamlaşma ve Tanışma'),
+  ('Nerelisin?', 'Where are you from?', 'A1', 'Selamlaşma ve Tanışma'),
+  ('Ben öğrenciyim.', 'I am a student.', 'A1', 'Selamlaşma ve Tanışma'),
+  ('Her sabah kahvaltı yaparım.', 'I have breakfast every morning.', 'A1', 'Günlük Rutin'),
+  ('İşe saat dokuzda giderim.', 'I go to work at nine.', 'A1', 'Günlük Rutin')
 ) as v(tr, en, lvl, topic)
 where not exists (
   select 1 from public.sentences s where s.english = v.en

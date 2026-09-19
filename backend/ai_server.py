@@ -451,8 +451,17 @@ def _parse_json_block(content: str) -> Optional[dict]:
 def _normalize_vocab(d: dict) -> dict:
     word = (d.get("word") or d.get("english") or "").strip()
     meaning = (d.get("meaning") or d.get("translation_tr") or d.get("turkish") or "").strip()
-    example = (d.get("example") or d.get("english") or word).strip()
-    return {"word": word, "meaning": meaning, "example": example}
+    # word asla Turkce / tam cumle olmasin
+    if re.search(r"[çğıöşüÇĞİÖŞÜ]", word):
+        if meaning and not re.search(r"[çğıöşüÇĞİÖŞÜ]", meaning) and len(meaning.split()) <= 3:
+            word, meaning = meaning, word
+        else:
+            return {"word": "", "meaning": "", "example": ""}
+    parts = word.split()
+    if len(parts) >= 4:
+        word = parts[0]
+    # example spoil etmesin — bos birak
+    return {"word": word, "meaning": meaning[:48], "example": ""}
 
 
 def _normalize_correction(d: dict) -> dict:
@@ -807,29 +816,32 @@ CUSTOM LESSON — WORD BUILDING (teacher-defined):
 LESSON FORMAT (every turn):
 1) Give a Turkish sentence in quotes for the student to translate OUT LOUD into English.
 2) Student speaks English (microphone). You judge right/wrong in Turkish.
-3) If wrong or incomplete on FIRST attempt (challenge_attempt is 1): stay on the SAME Turkish sentence.
-   - Brief Turkish feedback in [SAY_TR]. Give a hint: first TWO words of the correct English answer in [SAY_EN], then ask to try again in [SAY_TR].
-   - Do NOT give the next Turkish sentence yet. Do NOT use [CORRECTION] block on first attempt.
-4) If wrong again on SECOND attempt (challenge_attempt >= 2): use [CORRECTION], then [SAY_TR] "Doğrusunu dinleyelim:", [SAY_EN] full correct English, then next [SAY_TR] challenge.
-5) If correct: praise briefly, then give the NEXT Turkish sentence.
+3) Max 3 attempts per Turkish sentence (challenge_attempt 1, 2, then 3):
+   - attempt 1 wrong: SAME sentence, short hint = first TWO English words in [SAY_EN], ask to try again. NO [CORRECTION].
+   - attempt 2 wrong: SAME sentence, one more short hint. NO full answer yet.
+   - attempt 3 wrong OR message_kind=skip: [CORRECTION], [SAY_TR] "Doğrusunu dinleyelim:", [SAY_EN] full correct, then NEXT [SAY_TR] challenge.
+4) If correct (even with imperfect pronunciation / ASR typos): brief praise, then NEXT Turkish sentence. Do NOT nitpick pronunciation if the intended words are clear.
+
+KEEP ALL [SAY_TR] FEEDBACK SHORT (1 short sentence max):
+- Intro: "Merhaba! {{topic}} pratiği." then the challenge.
+- Correct: "Harika!" then next challenge.
+- Wrong (attempt 1–2): "Neredeyse — şu iki kelimeyle dene:" then [SAY_EN] first two words.
+- Skip / bilmiyorum / Türkçe yardım requesting skip: give full [SAY_EN] answer once, then next challenge. Do NOT lecture.
 
 OUTPUT FORMAT (required — system reads aloud using these tags):
 - Turkish instructions + Turkish sentence to translate:
 [SAY_TR]
-Şu cümleyi İngilizceye çevir:
+Şu cümleyi çevir:
 
 "Her sabah kahvaltı yaparım."
 [/SAY_TR]
 
-- After student answers — feedback in Turkish, optional correct English (ONLY this block is English voice):
+- After student answers — short feedback:
 [SAY_TR]
-Güzel! Küçük bir hata var.
+Harika!
 [/SAY_TR]
-[SAY_EN]
-I have breakfast every morning.
-[/SAY_EN]
 [SAY_TR]
-Sıradaki cümle:
+Sıradaki:
 
 "Akşamları televizyon izlerim."
 [/SAY_TR]
@@ -839,7 +851,7 @@ RULES:
 - [SAY_TR] = Turkish ONLY. NEVER include any English words, letters, or phrases inside [SAY_TR], because the Turkish text-to-speech engine will mispronounce them.
 - [SAY_EN] = ONLY the model English answer (one short sentence). Never put Turkish inside [SAY_EN].
 - CRITICAL: Every English model/corrected sentence MUST be inside its own [SAY_EN]...[/SAY_EN] block.
-- On FIRST message: welcome in Turkish naming the EXACT topic ({title}), then first [SAY_TR] with one sentence FROM THIS TOPIC ONLY.
+- On FIRST message: welcome naming the EXACT topic ({title}), then first [SAY_TR] with one sentence FROM THIS TOPIC ONLY.
 - When student sends English: evaluate in Turkish in [SAY_TR]; follow attempt rules for [SAY_EN] and [CORRECTION]; then next [SAY_TR] challenge when appropriate.
 - Level {session_level}: simple sentences for A1/A2.
 - Topic: {title} — {desc}. Tone: {tone}. Student: {user_name}.
@@ -848,29 +860,29 @@ RULES:
 - If SENTENCE BANK is empty, invent simple on-topic Turkish sentences for "{title}" yourself.
 
 VOCABULARY PANEL (required every response — 1 or 2 items, shown in UI, NOT in [SAY_TR]/[SAY_EN]):
-[VOCABULARY]{{"word":"brush","meaning":"fırçalamak","example":"I brush my teeth every day."}}[/VOCABULARY]
-[VOCABULARY]{{"word":"every day","meaning":"her gün","example":"I exercise every day."}}[/VOCABULARY]
-- Pick useful English words/phrases from the current Turkish sentence or topic.
+[VOCABULARY]{{"word":"mother","meaning":"anne"}}[/VOCABULARY]
+- "word" MUST be a short ENGLISH word (1–2 words max). NEVER Turkish. NEVER the full answer sentence.
+- Do NOT put the full English answer in vocabulary (that spoils the exercise).
 - ALWAYS include at least one [VOCABULARY] block per response.
 
-CORRECTION (only on SECOND wrong attempt — challenge_attempt >= 2):
+CORRECTION (only on THIRD wrong attempt — challenge_attempt >= 3 — or skip):
 [CORRECTION]{{"original":"student attempt","correction":"correct English","explanation":"kisa Turkce aciklama","turkish":"verilen Turkce cumle"}}[/CORRECTION]
-- On first wrong attempt (challenge_attempt=1): NO [CORRECTION] — hint only with first two English words in [SAY_EN], same Turkish challenge.
-- On second wrong attempt: [CORRECTION] then [SAY_TR] doğrusunu dinleyelim, [SAY_EN] full sentence, then [SAY_TR] NEXT challenge.
 
 MICROPHONE / INPUT:
 - The app sends the student's spoken English as text. NEVER say you cannot hear the microphone.
 - NEVER ask the student to type instead of speak. NEVER mention being an AI that cannot hear audio.
 - Treat every English message as the student's spoken answer.
-- If message_kind is "help" OR the student writes in Turkish asking for help (yardım, yapamadım, anlamadım): respond in Turkish only, encourage them, repeat the same challenge — do NOT score it as a wrong translation.
+- Pronunciation: if words are close (take/tayk, weekend/weeknd), ACCEPT as correct and move on.
+- If message_kind is "skip" OR student says bilmiyorum / geçelim: give correct [SAY_EN], then NEXT challenge.
+- If message_kind is "help" (yardım without skip): short tip, SAME challenge.
 - If the student mixes Turkish and English, evaluate ONLY the English part as their answer.
 - NEVER transliterate Turkish into fake English phonetics.
 
-AFTER WRONG ANSWER (challenge_attempt=1):
-- Same Turkish sentence. Hint with first two English words in [SAY_EN]. No [CORRECTION] yet.
+AFTER WRONG ANSWER (challenge_attempt=1 or 2):
+- Same Turkish sentence. Short hint. No next sentence yet.
 
-AFTER WRONG ANSWER (challenge_attempt>=2):
-- [CORRECTION] block, [SAY_TR] doğrusunu dinleyelim, [SAY_EN] full model sentence, then [SAY_TR] NEXT sentence.
+AFTER WRONG ANSWER (challenge_attempt>=3) OR skip:
+- [CORRECTION] optional, [SAY_TR] doğrusunu dinleyelim, [SAY_EN] full model sentence, then [SAY_TR] NEXT sentence.
 """
     if ai.get("system_prompt"):
         base += f"\nADMIN:\n{ai['system_prompt']}\n"
@@ -900,6 +912,33 @@ AFTER WRONG ANSWER (challenge_attempt>=2):
     return base
 
 
+def _topic_fallback_sentence(scenario: dict) -> tuple:
+    """Konuya ozel yedek TR/EN — generic 'pratik yapmak' asla kullanma."""
+    title = (scenario.get("title_tr") or scenario.get("title") or "").lower()
+    samples = [
+        (("selam", "tanış", "greet", "intro"), "Adım Ayşe.", "My name is Ayşe.", "name", "ad"),
+        (("aile", "family"), "Annem öğretmen.", "My mother is a teacher.", "mother", "anne"),
+        (("hobi", "hobby"), "Kitap okumayı severim.", "I like reading books.", "reading", "okuma"),
+        (("hava", "weather"), "Bugün hava çok güzel.", "The weather is very nice today.", "weather", "hava"),
+        (("doktor", "doctor", "sağlık"), "Başım ağrıyor.", "I have a headache.", "headache", "baş ağrısı"),
+        (("telefon", "phone"), "Sizi sonra arayacağım.", "I will call you back later.", "call", "aramak"),
+        (("kafe", "cafe", "kahve"), "Bir kahve alabilir miyim?", "Can I have a coffee, please?", "coffee", "kahve"),
+        (("yol", "direction"), "Tren istasyonu nerede?", "Where is the train station?", "where", "nerede"),
+        (("rutin", "routine", "günlük"), "Her sabah kahvaltı yaparım.", "I have breakfast every morning.", "breakfast", "kahvaltı"),
+    ]
+    for keys, tr, en, w, m in samples:
+        if any(k in title for k in keys):
+            return tr, en, w, m
+    # Son care: basliktan guvenli kisa cumle
+    label = scenario.get("title_tr") or scenario.get("title") or "bu konu"
+    return (
+        f"{label} hakkında konuşuyorum.",
+        f"I am talking about {scenario.get('title') or 'this topic'}.",
+        "talk",
+        "konuşmak",
+    )
+
+
 def _first_turn_welcome(session_level: str, scenario: dict, user_name: str) -> Optional[str]:
     """Ilk mesajda LLM beklemeden hizli karsilama (cumle bankasindan)."""
     title = scenario.get("title_tr") or scenario.get("title") or "ders"
@@ -911,38 +950,38 @@ def _first_turn_welcome(session_level: str, scenario: dict, user_name: str) -> O
         note_block = f"\n\n{note}" if note else ""
         first = words[0]
         return f"""[SAY_TR]
-Merhaba {user_name}! {title} — kelime ile cümle kurma pratiğine başlıyoruz.
+Merhaba {user_name}! {title} pratiği.
 
-Şu kelimeleri kullanarak İngilizce bir cümle kur:
+Şu kelimelerle İngilizce cümle kur:
 
 {wstr}{note_block}
 [/SAY_TR]
-[VOCABULARY]{{"word":"{first}","meaning":"hedef kelime","example":"Use {first} in your sentence."}}[/VOCABULARY]"""
+[VOCABULARY]{{"word":"{first}","meaning":"hedef kelime"}}[/VOCABULARY]"""
     rows = _load_scenario_sentences(session_level, scenario, limit=30)
     if not rows:
+        tr, _en, w, m = _topic_fallback_sentence(scenario)
         return f"""[SAY_TR]
-Merhaba {user_name}! {title} konusunda pratiğe başlıyoruz.
+Merhaba {user_name}! {title} pratiği.
 
-Bu konuyla ilgili kısa bir Türkçe cümleyi İngilizceye çevirmeye hazır mısın? İlk cümleyi şimdi veriyorum — dinle ve İngilizce söyle.
-[/SAY_TR]
-[SAY_TR]
-Şu cümleyi İngilizceye çevir:
+Şu cümleyi çevir:
 
-"Bu konuda pratik yapmak istiyorum."
+"{tr}"
 [/SAY_TR]
-[VOCABULARY]{{"word":"practice","meaning":"pratik","example":"I want to practice this topic."}}[/VOCABULARY]"""
+[VOCABULARY]{{"word":"{w}","meaning":"{m}"}}[/VOCABULARY]"""
     pick = random.choice(rows)
     tr = (pick.get("turkish") or "").strip()
     if not tr:
         return None
+    en = (pick.get("english") or "").strip()
+    word = en.split()[0].strip(".,!?") if en else "hello"
     return f"""[SAY_TR]
-Merhaba {user_name}! {title} konusunda pratiğe başlıyoruz.
+Merhaba {user_name}! {title} pratiği.
 
-Şu cümleyi İngilizceye çevir:
+Şu cümleyi çevir:
 
 "{tr}"
 [/SAY_TR]
-[VOCABULARY]{{"word":"practice","meaning":"pratik","example":"Let's practice English."}}[/VOCABULARY]"""
+[VOCABULARY]{{"word":"{word}","meaning":"kelime"}}[/VOCABULARY]"""
 
 
 async def openrouter_chat(messages: list) -> str:
@@ -1483,9 +1522,15 @@ def _enrich_user_message(chat_data: ChatMessage) -> str:
     if not base:
         return base
     meta: List[str] = []
-    if chat_data.message_kind == "help":
+    if chat_data.message_kind == "skip":
         meta.append(
-            "[STUDENT_REQUEST: HELP in Turkish — encourage, repeat the SAME Turkish challenge; "
+            "[STUDENT_REQUEST: SKIP — give correct [SAY_EN] for CURRENT_CHALLENGE_TR, then NEXT on-topic challenge. Keep [SAY_TR] very short.]"
+        )
+        if chat_data.current_challenge:
+            meta.append(f"[CURRENT_CHALLENGE_TR: {chat_data.current_challenge}]")
+    elif chat_data.message_kind == "help":
+        meta.append(
+            "[STUDENT_REQUEST: HELP in Turkish — short tip, repeat the SAME Turkish challenge; "
             "do NOT grade as a wrong translation; do NOT invent English phonetics for Turkish words]"
         )
     elif chat_data.message_kind == "answer":
@@ -1493,13 +1538,13 @@ def _enrich_user_message(chat_data: ChatMessage) -> str:
             meta.append(f"[CURRENT_CHALLENGE_TR: {chat_data.current_challenge}]")
         attempt = chat_data.challenge_attempt or 1
         meta.append(f"[CHALLENGE_ATTEMPT: {attempt}]")
-        if attempt == 1:
+        if attempt <= 2:
             meta.append(
-                "[If wrong: stay on same Turkish sentence, hint with first TWO English words only — no CORRECTION]"
+                "[If wrong: stay on same Turkish sentence, hint with first TWO English words only — no CORRECTION yet]"
             )
-        elif attempt >= 2:
+        else:
             meta.append(
-                "[If wrong: use CORRECTION block, then doğrusunu dinleyelim + full [SAY_EN], then NEXT challenge]"
+                "[If wrong: use CORRECTION, then doğrusunu dinleyelim + full [SAY_EN], then NEXT challenge]"
             )
     if not meta:
         return base

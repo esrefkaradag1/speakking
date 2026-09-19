@@ -26,6 +26,7 @@ import {
   segmentsForTtsPlayback,
 } from '../lib/lessonHints';
 import { preprocessStudentMessage, englishAnswerSimilarity, looksLikePhoneticTurkish } from '../lib/studentMessage';
+
 import {
   LESSON_VIDEOS,
   unlockAudioElement,
@@ -40,14 +41,23 @@ import { checkWav2lipHealth } from '../lib/wav2lipApi';
 import { checkAiBackend } from '../lib/aiHealth';
 
 // ==================== HINT HELPER (Hangman) ====================
-const HintHelper = ({ sentence, turkishPreview, loading, onHintUsed, variant = 'default' }) => {
+const HintHelper = ({
+  sentence,
+  turkishPreview,
+  loading,
+  onHintUsed,
+  onFullyRevealed,
+  variant = 'default',
+}) => {
   const isWide = variant === 'wide';
   const [revealedIndices, setRevealedIndices] = useState(new Set());
   const [hintsUsed, setHintsUsed] = useState(0);
+  const fullyFiredRef = useRef(false);
 
   useEffect(() => {
     setRevealedIndices(new Set());
     setHintsUsed(0);
+    fullyFiredRef.current = false;
   }, [sentence, turkishPreview]);
 
   const displaySentence = loading ? '' : (sentence || '');
@@ -79,12 +89,20 @@ const HintHelper = ({ sentence, turkishPreview, loading, onHintUsed, variant = '
       .map((p) => p.idx);
     if (hiddenPositions.length === 0) return;
     const randomIdx = hiddenPositions[Math.floor(Math.random() * hiddenPositions.length)];
-    setRevealedIndices((prev) => new Set([...prev, randomIdx]));
+    const nextSet = new Set([...revealedIndices, randomIdx]);
+    setRevealedIndices(nextSet);
     setHintsUsed((prev) => {
       const next = prev + 1;
       if (onHintUsed) onHintUsed(next);
       return next;
     });
+    const stillHidden = letterPositions.filter(
+      (p) => p.isLetter && !nextSet.has(p.idx)
+    ).length;
+    if (stillHidden === 0 && !fullyFiredRef.current) {
+      fullyFiredRef.current = true;
+      onFullyRevealed?.(displaySentence);
+    }
   };
 
   const letterGrid = (
@@ -306,14 +324,21 @@ const CorrectionCard = ({ correction, speakyMuted }) => {
 };
 
 // ==================== VOCABULARY HINT CARD ====================
+/** Ornek cumle cevabi spoil etmesin — sadece kelime + anlam */
 const VocabularyCard = ({ vocab }) => {
   const [playing, setPlaying] = useState(false);
+  const word = (vocab.word || '').trim();
+  const meaning = (vocab.meaning || '').trim();
 
   const pronounce = async () => {
+    if (!word) return;
     try {
       setPlaying(true);
-      const res = await speakText(vocab.example || vocab.word, 'en');
-      const audioBlob = base64ToBlob(res.data.audio, 'audio/mp3');
+      const res = await speakText(word, 'en');
+      const audioBlob = base64ToBlob(
+        res.data.audio,
+        res.data.format === 'wav' ? 'audio/wav' : 'audio/mpeg'
+      );
       const url = URL.createObjectURL(audioBlob);
       const audio = new Audio(url);
       audio.onended = () => setPlaying(false);
@@ -327,18 +352,15 @@ const VocabularyCard = ({ vocab }) => {
     <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
       className="glass p-3 border-l-4 border-indigo-500/70 bg-indigo-500/5 group" data-testid="vocabulary-card">
       <div className="flex items-center justify-between mb-1">
-        <span className="text-sm font-semibold text-indigo-300">{vocab.word}</span>
-        <button onClick={pronounce} disabled={playing}
+        <span className="text-sm font-semibold text-indigo-300">{word}</span>
+        <button onClick={pronounce} disabled={playing || !word}
           className="p-1 text-slate-500 hover:text-indigo-400 transition-colors opacity-0 group-hover:opacity-100"
-          data-testid={`pronounce-${vocab.word}`}>
+          data-testid={`pronounce-${word}`}>
           <Volume2 className="w-3.5 h-3.5" />
         </button>
       </div>
-      {vocab.meaning && vocab.meaning !== 'ders kelimesi' && (
-        <p className="text-xs text-emerald-400 mb-1">{vocab.meaning}</p>
-      )}
-      {vocab.example && (
-        <p className="text-[11px] text-slate-400 italic">"{vocab.example}"</p>
+      {meaning && meaning !== 'ders kelimesi' && (
+        <p className="text-xs text-emerald-400">{meaning}</p>
       )}
     </motion.div>
   );
@@ -440,7 +462,12 @@ export default function LessonSession() {
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
-  const [remainingTime, setRemainingTime] = useState(location.state?.remainingMinutes || 30);
+  const [remainingTime, setRemainingTime] = useState(() => {
+    const raw = location.state?.remainingMinutes || 30;
+    // Musteri: 15→20, 30→35 — AI bekletmeleri icin +5 dk tampon
+    return Number(raw) + 5;
+  });
+
   const [corrections, setCorrections] = useState([]);
   const [vocabulary, setVocabulary] = useState([]);
   const [sessionEnded, setSessionEnded] = useState(false);
@@ -1145,11 +1172,27 @@ export default function LessonSession() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages]);
 
-  const normalizeVocab = (v) => ({
-    word: (v.word || v.english || '').trim(),
-    meaning: (v.meaning || v.translation_tr || v.turkish || '').trim(),
-    example: (v.example || v.english || v.word || '').trim(),
-  });
+  const normalizeVocab = (v) => {
+    let word = (v.word || v.english || '').trim();
+    let meaning = (v.meaning || v.translation_tr || v.turkish || '').trim();
+    // Turkce kelime "word" alanina yazilmissa degistir
+    if (/[çğıöşüÇĞİÖŞÜ]/.test(word) || (word.split(/\s+/).length >= 4 && !meaning)) {
+      if (meaning && !/[çğıöşüÇĞİÖŞÜ]/.test(meaning) && meaning.split(/\s+/).length <= 3) {
+        const swap = word;
+        word = meaning;
+        meaning = swap;
+      } else {
+        // Tam cumle / TR → atla
+        return null;
+      }
+    }
+    // Tam Ingilizce cevap cumlesi spoil etmesin
+    if (word.split(/\s+/).length >= 4) {
+      word = word.split(/\s+/)[0].replace(/[^a-zA-Z']/g, '');
+    }
+    if (!word || word.length < 2) return null;
+    return { word, meaning: meaning.slice(0, 40), example: '' };
+  };
 
   // Process structured data from API response
   const processStructuredResponse = (data) => {
@@ -1165,7 +1208,7 @@ export default function LessonSession() {
     if (data.vocabulary?.length > 0) {
       const normalized = data.vocabulary
         .map(normalizeVocab)
-        .filter((v) => v.word || v.meaning);
+        .filter(Boolean);
       if (normalized.length) {
         setVocabulary((prev) => [...normalized, ...prev].slice(0, 10));
       }
@@ -1222,37 +1265,28 @@ export default function LessonSession() {
   const recognitionRef = useRef(null);
   const asrPassRef = useRef('en'); // en | tr-retry
   const pendingEnTranscriptRef = useRef('');
+  const asrBufferRef = useRef('');
+  const asrSilenceTimerRef = useRef(null);
+  const asrWantListeningRef = useRef(false);
 
   useEffect(() => {
     if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
       const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
       const rec = new SpeechRecognition();
-      rec.continuous = false;
+      // Surekli dinle — A1 ogrencileri dusunurken erken kesilmesin
+      rec.continuous = true;
       rec.interimResults = true;
       rec.lang = 'en-US';
       rec.maxAlternatives = 5;
 
-      rec.onresult = (event) => {
-        let best = '';
-        let bestScore = -1;
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          if (!event.results[i].isFinal) continue;
-          for (let a = 0; a < event.results[i].length; a++) {
-            const alt = event.results[i][a];
-            const conf = typeof alt.confidence === 'number' ? alt.confidence : 0.5;
-            if (conf >= bestScore) {
-              bestScore = conf;
-              best = alt.transcript;
-            }
-          }
-        }
-        const transcript = best.trim();
+      const flushTranscript = (text) => {
+        const transcript = String(text || '').trim();
         if (!transcript || !sendTranscribedRef.current) return;
 
-        // en-US sonucu Turkce yardim gibiyse bir kez tr-TR ile tekrar dinle
         if (asrPassRef.current === 'en' && looksLikePhoneticTurkish(transcript)) {
           pendingEnTranscriptRef.current = transcript;
           asrPassRef.current = 'tr-retry';
+          asrWantListeningRef.current = true;
           try {
             rec.stop();
           } catch {
@@ -1261,6 +1295,7 @@ export default function LessonSession() {
           setTimeout(() => {
             try {
               rec.lang = 'tr-TR';
+              rec.continuous = false;
               rec.start();
               setIsRecording(true);
               toast.info('Turkce algilaniyor…', { duration: 1500 });
@@ -1280,17 +1315,49 @@ export default function LessonSession() {
 
         asrPassRef.current = 'en';
         pendingEnTranscriptRef.current = '';
+        asrBufferRef.current = '';
+        asrWantListeningRef.current = false;
         try {
           rec.stop();
         } catch {
           /* ignore */
         }
+        setIsRecording(false);
         sendTranscribedRef.current(finalText);
       };
 
+      rec.onresult = (event) => {
+        let interim = '';
+        let finals = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const piece = event.results[i][0]?.transcript || '';
+          if (event.results[i].isFinal) finals += `${piece} `;
+          else interim += piece;
+        }
+        if (finals.trim()) {
+          asrBufferRef.current = `${asrBufferRef.current} ${finals}`.replace(/\s+/g, ' ').trim();
+        }
+        // Sessizlik: son finalden 2.2sn sonra gonder (dusunen ogrenci icin)
+        if (asrSilenceTimerRef.current) clearTimeout(asrSilenceTimerRef.current);
+        asrSilenceTimerRef.current = setTimeout(() => {
+          const buf = asrBufferRef.current.trim() || interim.trim();
+          if (buf) flushTranscript(buf);
+        }, 2200);
+      };
+
       rec.onend = () => {
-        // tr-retry baslatilirken onend gelebilir — kaydi kapatma
         if (asrPassRef.current === 'tr-retry') return;
+        // Kullanici hâlâ dinliyor ve continuous — tarayici kapattiysa yeniden baslat
+        if (asrWantListeningRef.current && asrPassRef.current === 'en') {
+          try {
+            rec.lang = 'en-US';
+            rec.continuous = true;
+            rec.start();
+            return;
+          } catch {
+            /* ignore */
+          }
+        }
         setIsRecording(false);
       };
 
@@ -1300,11 +1367,17 @@ export default function LessonSession() {
           const fallback = pendingEnTranscriptRef.current;
           asrPassRef.current = 'en';
           pendingEnTranscriptRef.current = '';
+          asrWantListeningRef.current = false;
           setIsRecording(false);
           if (sendTranscribedRef.current) sendTranscribedRef.current(fallback);
           return;
         }
+        if (event.error === 'no-speech' && asrWantListeningRef.current) {
+          // Sessizlik — yeniden baslat, hata gosterme
+          return;
+        }
         asrPassRef.current = 'en';
+        asrWantListeningRef.current = false;
         setIsRecording(false);
         if (event.error === 'not-allowed') {
           toast.error('Mikrofon izni gerekli. Adres cubugundaki kilit ikonundan izin verin.');
@@ -1317,6 +1390,9 @@ export default function LessonSession() {
 
       recognitionRef.current = rec;
     }
+    return () => {
+      if (asrSilenceTimerRef.current) clearTimeout(asrSilenceTimerRef.current);
+    };
   }, []);
 
   const ensureMicPermission = async () => {
@@ -1344,10 +1420,14 @@ export default function LessonSession() {
     try {
       asrPassRef.current = 'en';
       pendingEnTranscriptRef.current = '';
+      asrBufferRef.current = '';
+      asrWantListeningRef.current = true;
+      if (asrSilenceTimerRef.current) clearTimeout(asrSilenceTimerRef.current);
       recognitionRef.current.lang = 'en-US';
+      recognitionRef.current.continuous = true;
       recognitionRef.current.start();
       setIsRecording(true);
-      toast.info('Ingilizce cevap veya Turkce yardim — bitince gonderilir', { duration: 2800 });
+      toast.info('Konusun — bitince ~2 sn bekleyip gonderir', { duration: 2800 });
     } catch (error) {
       if (error?.message?.includes('already started')) {
         recognitionRef.current.stop();
@@ -1360,9 +1440,23 @@ export default function LessonSession() {
   };
 
   const stopRecording = () => {
+    asrWantListeningRef.current = false;
+    if (asrSilenceTimerRef.current) {
+      clearTimeout(asrSilenceTimerRef.current);
+      asrSilenceTimerRef.current = null;
+    }
+    const buf = asrBufferRef.current.trim();
     if (recognitionRef.current && isRecording) {
-      recognitionRef.current.stop();
+      try {
+        recognitionRef.current.stop();
+      } catch {
+        /* ignore */
+      }
       setIsRecording(false);
+    }
+    if (buf && sendTranscribedRef.current) {
+      asrBufferRef.current = '';
+      sendTranscribedRef.current(buf);
     }
   };
 
@@ -1387,7 +1481,8 @@ export default function LessonSession() {
 
     const pre = preprocessStudentMessage(trimmed);
 
-    if (pre.kind === 'help') {
+    // Yardim veya "bilmiyorum/gecelim" → dogrusunu verip sonraki soruya gec
+    if (pre.kind === 'help' || pre.kind === 'skip') {
       cancelPlayback();
       flushSync(() => {
         setMessages((prev) => [...prev, { role: 'user', content: trimmed, voice }]);
@@ -1400,10 +1495,13 @@ export default function LessonSession() {
           {
             session_id: sessionId,
             message: trimmed,
-            message_kind: 'help',
+            message_kind: pre.kind === 'skip' ? 'skip' : 'help',
+            current_challenge: currentChallengeRef.current || undefined,
+            challenge_attempt: Math.max(challengeAttemptRef.current, 3),
           },
           { headers: await getAuthHeaders() }
         );
+        challengeAttemptRef.current = 0;
         await runAiTurn(response.data, (prev) => [
           ...prev,
           {
@@ -1421,16 +1519,17 @@ export default function LessonSession() {
     }
 
     const answerText = pre.englishAnswer || trimmed;
-    // Zayif telaffuz / ASR hatasi: beklenen cevaba cok yakinysa duzelt
+    // Telaffuz toleransi — yakinsa dogru kabul et
     let finalAnswer = answerText;
     if (currentHint?.english) {
       const sim = englishAnswerSimilarity(answerText, currentHint.english);
-      if (sim >= 0.72) {
+      if (sim >= 0.58) {
         finalAnswer = currentHint.english.trim();
       }
     }
     const challenge = currentChallengeRef.current;
-    const attempt = challenge ? challengeAttemptRef.current + 1 : 1;
+    // Max 3 deneme
+    const attempt = challenge ? Math.min(challengeAttemptRef.current + 1, 3) : 1;
 
     cancelPlayback();
     flushSync(() => {
@@ -1465,7 +1564,7 @@ export default function LessonSession() {
         newChallenge &&
         prevChallenge.trim().toLocaleLowerCase('tr') === newChallenge.trim().toLocaleLowerCase('tr');
 
-      if (sameChallenge) {
+      if (sameChallenge && attempt < 3) {
         challengeAttemptRef.current = attempt;
       } else {
         challengeAttemptRef.current = 0;
@@ -1487,6 +1586,21 @@ export default function LessonSession() {
       setIsLoading(false);
       setMediaPhase('idle');
     }
+  };
+
+  const skipToNextQuestion = async () => {
+    await ensureAudioUnlocked();
+    await submitUserMessage('Bilmiyorum, bu soruyu geçelim başka sorar mısın?', {
+      voice: false,
+    });
+  };
+
+  const onHangmanFullyRevealed = async (englishSentence) => {
+    const en = String(englishSentence || currentHint?.english || '').trim();
+    if (!en || isLoading) return;
+    toast.success('Kopya tamam — dogru cevabi dinleyip sonraki soruya geciyoruz');
+    await ensureAudioUnlocked();
+    await submitUserMessage(en, { voice: false });
   };
 
   const sendTranscribedMessage = async (user_text) => {
@@ -1817,6 +1931,7 @@ export default function LessonSession() {
                       turkishPreview={currentHint.turkish}
                       loading={currentHint.loading}
                       onHintUsed={() => setHintsUsedTotal((prev) => prev + 1)}
+                      onFullyRevealed={onHangmanFullyRevealed}
                     />
                   ) : (
                     <div className="flex items-center justify-center gap-4 py-6 px-4">
@@ -1825,7 +1940,7 @@ export default function LessonSession() {
                         <span className="text-[10px] font-black uppercase tracking-widest text-slate-500 block">
                           Kopya Modülü
                         </span>
-                        <p className="text-slate-500 text-xs">İpucu beklenebilir</p>
+                        <p className="text-slate-500 text-xs">Soru yüklenince ipucu burada</p>
                       </div>
                     </div>
                   )}
@@ -1942,17 +2057,29 @@ export default function LessonSession() {
             {/* Input Area inside Chat */}
             <div className="p-4 border-t border-white/10 bg-slate-900/50">
               {voiceMode ? (
-                <div className="flex flex-col items-center justify-center py-2">
-                  <button onClick={toggleRecording} disabled={isLoading || isPreparingVoice || isSpeaking || sessionEnded}
-                    className={`w-14 h-14 rounded-full flex items-center justify-center transition-all duration-300 shadow-xl
-                      ${isRecording ? 'bg-red-500 animate-pulse scale-105 shadow-red-500/50' : 'bg-indigo-600 hover:bg-indigo-500 shadow-indigo-600/30'}
-                      ${(isLoading || isPreparingVoice || isSpeaking || sessionEnded) ? 'opacity-50 cursor-not-allowed' : ''}`}
-                    data-testid="mic-btn">
-                    {isLoading ? <Loader2 className="w-5 h-5 text-white animate-spin" />
-                      : isRecording ? <MicOff className="w-5 h-5 text-white" />
-                      : <Mic className="w-5 h-5 text-white" />}
-                  </button>
-                  <p className="text-xs text-slate-400 mt-3">{isRecording ? 'Kaydi durdur' : 'Konusmak icin tikla'}</p>
+                <div className="flex flex-col items-center justify-center py-2 gap-3">
+                  <div className="flex items-center gap-4">
+                    <button onClick={toggleRecording} disabled={isLoading || isPreparingVoice || isSpeaking || sessionEnded}
+                      className={`w-14 h-14 rounded-full flex items-center justify-center transition-all duration-300 shadow-xl
+                        ${isRecording ? 'bg-red-500 animate-pulse scale-105 shadow-red-500/50' : 'bg-indigo-600 hover:bg-indigo-500 shadow-indigo-600/30'}
+                        ${(isLoading || isPreparingVoice || isSpeaking || sessionEnded) ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      data-testid="mic-btn">
+                      {isLoading ? <Loader2 className="w-5 h-5 text-white animate-spin" />
+                        : isRecording ? <MicOff className="w-5 h-5 text-white" />
+                        : <Mic className="w-5 h-5 text-white" />}
+                    </button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={isLoading || isPreparingVoice || isSpeaking || sessionEnded}
+                      onClick={skipToNextQuestion}
+                      className="rounded-full border-white/20 text-slate-200 hover:bg-white/10"
+                      data-testid="next-question-btn"
+                    >
+                      Next Question
+                    </Button>
+                  </div>
+                  <p className="text-xs text-slate-400">{isRecording ? 'Kaydi durdur veya 2 sn bekle' : 'Konusmak icin tikla'}</p>
                 </div>
               ) : (
                 <form onSubmit={sendMessage} className="flex gap-2">

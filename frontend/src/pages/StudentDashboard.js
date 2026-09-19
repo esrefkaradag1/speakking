@@ -385,6 +385,21 @@ export default function StudentDashboard() {
                     value={((progress?.used_today || 0) / (progress?.daily_limit || 30)) * 100} 
                     className="h-2 bg-slate-800" 
                   />
+                  {(progress?.used_today || 0) >= (progress?.daily_limit || 30) && (
+                    <Button
+                      onClick={() => navigate('/payment')}
+                      className="w-full mt-2 bg-amber-600 hover:bg-amber-500 rounded-xl"
+                    >
+                      Bugüne ekstra süre al (+30 / +60 dk)
+                    </Button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => navigate('/payment')}
+                    className="text-xs text-indigo-400 hover:underline"
+                  >
+                    Paketler & ekstra süre →
+                  </button>
                 </div>
               </div>
 

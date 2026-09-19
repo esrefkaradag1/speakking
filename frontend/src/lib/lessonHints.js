@@ -4,7 +4,9 @@ const FEEDBACK_MARKERS =
   /doğru|dogru|yanlış|yanlis|hata|teşekkür|tesekkur|güzel|guzel|harika|tebrik|yapmalı|yapmaliydin|olmalı|demek|anlamına|çevirisi|cevirisi|ingilizcesi\s+nedir|yapay zeka|sesinizi algılayam|yazarak iletin/i;
 
 function isChallengeBlock(text) {
-  return /çevir|sıradaki|şimdi|tekrar|cumle|cümle|how do you say|dinleyelim/i.test(text);
+  return /çevir|sıradaki|şimdi|tekrar|cumle|cümle|how do you say|dinleyelim|pratiğ|pratik|merhaba/i.test(
+    text
+  );
 }
 
 function extractQuotedTurkish(text) {

@@ -1,7 +1,10 @@
 /** Ogrenci mesajini (mikrofon/yazi) cevap vs yardim vs Ingilizce cikarim icin isle */
 
 const HELP_RE =
-  /yard[iı]m|çözemedim|cozemedim|anlamad[iı]m|bilmiyorum|yapamad[iı]m|bulamad[iı]m|tekrar\s+eder|nas[iı]l\s+yap|ipucu|söyler\s+misin|soyler\s+misin|help\s+me|i\s+can'?t|cannot\s+translate|don'?t\s+know|tam\s+yapamad|cevap\s+bulamad|bu\s+soruyu/i;
+  /yard[iı]m|çözemedim|cozemedim|anlamad[iı]m|bilmiyorum|yapamad[iı]m|bulamad[iı]m|tekrar\s+eder|nas[iı]l\s+yap|ipucu|söyler\s+misin|soyler\s+misin|help\s+me|i\s+can'?t|cannot\s+translate|don'?t\s+know|tam\s+yapamad|cevap\s+bulamad|bu\s+soruyu|ge[çc]elim|ge[çc]ebilir|atla|ba[şs]ka\s+soru|skip|next\s+question|pass/i;
+
+const SKIP_RE =
+  /ge[çc]elim|ge[çc]ebilir|atla|ba[şs]ka\s+soru|soruyu\s+ge[çc]|bilmiyorum|yapamad[iı]m|don'?t\s+know|skip|next\s+question|pass\s+this/i;
 
 const TURKISH_RE = /[çğıöşüÇĞİÖŞÜ]/;
 
@@ -16,7 +19,9 @@ const PHONETIC_TR_MAP = [
   [/cozemedim|chozemedim|çözemedim/i, 'çözemedim'],
   [/yapamadim|yapamadım|yapamad[iı]m/i, 'yapamadım'],
   [/anlamadim|anlamadım/i, 'anlamadım'],
-  [/bilmiyorum|bill\s*me\s*yo/i, 'bilmiyorum'],
+  [/bilmiyorum|bill\s*me\s*yo|gullible|dinosaur/i, 'bilmiyorum'],
+  [/ge[çc]elim|getch|get\s*elim|catch\s*elim|geçelim/i, 'geçelim'],
+  [/ba[şs]ka\s+soru|bashka|another\s+question/i, 'başka soru'],
   [/yardim|yardım|yar\s*dim/i, 'yardım'],
   [/lutfen|lütfen|loot\s*fen/i, 'lütfen'],
   [/tekrar|tek\s*rar/i, 'tekrar'],
@@ -24,7 +29,7 @@ const PHONETIC_TR_MAP = [
 ];
 
 const TURKISH_PHONETIC_HINTS =
-  /\b(boo|nay|are\s+d[iı]m|eder\s+misin|yard[iı]m|tam\s+yapamad|cevap\s+bulamad|bu\s+soruyu|cozemedim|yapamadim|anlamadim|bilmiyorum|lutfen|tekrar|ipucu)\b/i;
+  /\b(boo|nay|are\s+d[iı]m|eder\s+misin|yard[iı]m|tam\s+yapamad|cevap\s+bulamad|bu\s+soruyu|cozemedim|yapamadim|anlamadim|bilmiyorum|lutfen|tekrar|ipucu|gullible|dinosaur|getch|geçelim|gecelim)\b/i;
 
 function latinWords(text) {
   return (text.match(/[A-Za-z']+/g) || []).filter((w) => w.length > 1);
@@ -36,10 +41,10 @@ export function looksLikePhoneticTurkish(text) {
   if (!t) return false;
   if (TURKISH_RE.test(t)) return true;
   if (TURKISH_PHONETIC_HINTS.test(t)) return true;
-  if (HELP_RE.test(t) && latinWords(t).length <= 8) return true;
-  // Kisa, cok az gercek Ingilizce fiil, fonetik kaliplar
+  if (HELP_RE.test(t) && latinWords(t).length <= 10) return true;
+  if (SKIP_RE.test(t)) return true;
   const hits = PHONETIC_TR_MAP.filter(([re]) => re.test(t)).length;
-  return hits >= 2;
+  return hits >= 1 && latinWords(t).length <= 8;
 }
 
 /** Fonetik metni Turkce yardim ifadesine cevir (mumkunse) */
@@ -52,9 +57,11 @@ export function repairPhoneticTurkish(text) {
   for (const [re, repl] of PHONETIC_TR_MAP) {
     repaired = repaired.replace(re, repl);
   }
-  // Hala fonetikse ve yardim kaliplari varsa standart yardim cumlesi
   if (looksLikePhoneticTurkish(t) && !TURKISH_RE.test(repaired)) {
-    if (/yard|help|eder|misin|yapamad|cozem|bilmiyor|anlamad|ipucu|tekrar/i.test(t)) {
+    if (SKIP_RE.test(t) || /geç|atla|skip|bilmiyor|gullible|dinosaur/i.test(t)) {
+      return 'Bilmiyorum, bu soruyu geçelim başka sorar mısın?';
+    }
+    if (/yard|help|eder|misin|yapamad|cozem|anlamad|ipucu|tekrar/i.test(t)) {
       return 'Bana yardım eder misin, bu soruyu yapamadım.';
     }
   }
@@ -63,10 +70,17 @@ export function repairPhoneticTurkish(text) {
 
 function looksLikeTurkishHelp(text) {
   const repaired = repairPhoneticTurkish(text);
-  if (HELP_RE.test(repaired) || HELP_RE.test(text)) return true;
+  if (HELP_RE.test(repaired) || HELP_RE.test(text) || SKIP_RE.test(text) || SKIP_RE.test(repaired)) {
+    return true;
+  }
   if (TURKISH_RE.test(repaired) && latinWords(repaired).length < 3) return true;
-  if (looksLikePhoneticTurkish(text) && latinWords(text).length <= 8) return true;
+  if (looksLikePhoneticTurkish(text) && latinWords(text).length <= 10) return true;
   return false;
+}
+
+export function looksLikeSkipRequest(text) {
+  const t = repairPhoneticTurkish(text);
+  return SKIP_RE.test(t) || SKIP_RE.test(String(text || ''));
 }
 
 /** Tırnak/icindeki Ingilizce parcayi bul */
@@ -112,7 +126,6 @@ export function extractEnglishPhrase(text) {
 
 /**
  * Beklenen Ingilizce cevaba yakinlik (0..1) — zayif telaffuz icin.
- * Ornek: "Are go to school" vs "I go to school" → yuksek skor.
  */
 export function englishAnswerSimilarity(spoken, expected) {
   const a = normalizeEn(spoken);
@@ -131,7 +144,8 @@ export function englishAnswerSimilarity(spoken, expected) {
   const wordScore = hits / bw.length;
 
   const lev = 1 - levenshtein(a, b) / Math.max(a.length, b.length);
-  return Math.max(wordScore * 0.7 + lev * 0.3, wordScore, lev * 0.85);
+  // Telaffuz toleransi: kelime sirasi / yakin ses benzerligi
+  return Math.max(wordScore * 0.75 + lev * 0.25, wordScore, lev * 0.9);
 }
 
 function normalizeEn(s) {
@@ -146,8 +160,11 @@ function wordClose(a, b) {
   if (a === b) return true;
   if (a.length <= 2 || b.length <= 2) return a === b;
   if (a.includes(b) || b.includes(a)) return true;
+  // take/tayk/tek gibi kisa kelimelerde daha toleransli
   const d = levenshtein(a, b);
-  return d <= Math.max(1, Math.floor(Math.min(a.length, b.length) / 3));
+  const maxLen = Math.max(a.length, b.length);
+  if (maxLen <= 5) return d <= 2;
+  return d <= Math.max(1, Math.floor(Math.min(a.length, b.length) / 2.5));
 }
 
 function levenshtein(a, b) {
@@ -166,7 +183,7 @@ function levenshtein(a, b) {
 }
 
 /**
- * @returns {{ kind: 'help'|'answer'|'off_topic', message: string, englishAnswer?: string }}
+ * @returns {{ kind: 'help'|'answer'|'off_topic'|'skip', message: string, englishAnswer?: string }}
  */
 export function preprocessStudentMessage(raw) {
   const original = String(raw || '').trim();
@@ -177,6 +194,12 @@ export function preprocessStudentMessage(raw) {
   const english = quoted || extractEnglishPhrase(message) || extractEnglishPhrase(original);
   const turkishChars = (message.match(TURKISH_RE) || []).length;
   const isHelp = looksLikeTurkishHelp(original) || looksLikeTurkishHelp(message);
+  const isSkip = looksLikeSkipRequest(original) || looksLikeSkipRequest(message);
+
+  // Bilmiyorum / gecelim → dogru cevabi verip sonraki soruya gec
+  if (isSkip && !english) {
+    return { kind: 'skip', message };
+  }
 
   // "Bu soruyu cozemedim, I go to school olabilir mi?" → sadece Ingilizce cevap
   if (english && (turkishChars > 0 || isHelp || HELP_RE.test(message))) {
