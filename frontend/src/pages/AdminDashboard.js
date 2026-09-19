@@ -1014,6 +1014,24 @@ export default function AdminDashboard() {
   const [cartesiaKeyInput, setCartesiaKeyInput] = useState('');
   const [cartesiaVoiceId, setCartesiaVoiceId] = useState('db6b0ed5-d5d3-463d-ae85-518a07d3c2b4');
   const [useCartesia, setUseCartesia] = useState(false);
+  const [activeSection, setActiveSection] = useState(() => {
+    try {
+      const q = new URLSearchParams(window.location.search).get('tab');
+      const allowed = [
+        'curriculum',
+        'packages',
+        'users',
+        'sentences',
+        'documents',
+        'ai-config',
+        'settings',
+      ];
+      if (q && allowed.includes(q)) return q;
+    } catch {
+      /* ignore */
+    }
+    return 'curriculum';
+  });
 
   useEffect(() => { fetchData(); // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -1412,78 +1430,159 @@ export default function AdminDashboard() {
   const scenariosForModule = (moduleId) => scenarios.filter((s) => s.module_id === moduleId);
   const quickAddModules = modules.filter((m) => m.category_code === quickAddLevel);
 
+  const ADMIN_SECTIONS = [
+    {
+      id: 'curriculum',
+      label: 'Müfredat',
+      desc: 'Seviye, alt kutu ve konular',
+      icon: GraduationCap,
+    },
+    {
+      id: 'packages',
+      label: 'Paketler & Ödeme',
+      desc: 'Fiyatlar, iyzico siparişleri',
+      icon: CreditCard,
+    },
+    {
+      id: 'users',
+      label: 'Kullanıcılar',
+      desc: 'Kota, şifre, roller',
+      icon: Users,
+    },
+    {
+      id: 'sentences',
+      label: 'Cümle Bankası',
+      desc: 'TR → EN ders cümleleri',
+      icon: FileText,
+    },
+    {
+      id: 'documents',
+      label: 'Dokümanlar',
+      desc: 'AI için ek metinler',
+      icon: Upload,
+    },
+    {
+      id: 'ai-config',
+      label: 'AI Eğitimi',
+      desc: 'Prompt ve ders kuralları',
+      icon: Brain,
+    },
+    {
+      id: 'settings',
+      label: 'Ayarlar',
+      desc: 'Ses, kota varsayılanı',
+      icon: Settings,
+    },
+  ];
+
+  const selectSection = (id) => {
+    setActiveSection(id);
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set('tab', id);
+      window.history.replaceState({}, '', url);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const activeMeta = ADMIN_SECTIONS.find((s) => s.id === activeSection) || ADMIN_SECTIONS[0];
+
   return (
     <div className="min-h-screen relative">
-      {/* Background */}
       <div className="page-background">
         <img src="https://images.unsplash.com/photo-1760224254117-7a40f7f03fe2?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzR8MHwxfHNlYXJjaHwyfHxwcmVtaXVtJTIwYWJzdHJhY3QlMjBkYXJrJTIwYmFja2dyb3VuZHxlbnwwfHx8fDE3NzU0NTY2MjJ8MA&ixlib=rb-4.1.0&q=85" alt="Background" />
       </div>
 
-      {/* Header */}
       <header className="sticky top-0 z-50 glass-header">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
             <button onClick={() => navigate('/')}
               className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors" data-testid="back-btn">
-              <ArrowLeft className="w-5 h-5" /><span>Ana Sayfaya Don</span>
+              <ArrowLeft className="w-5 h-5" /><span className="hidden sm:inline">Ana Sayfa</span>
             </button>
-            <h1 className="text-xl font-heading font-semibold text-white">Yonetim Paneli</h1>
-            <div className="w-24" />
+            <div className="text-center">
+              <h1 className="text-lg sm:text-xl font-heading font-semibold text-white">Yönetim Paneli</h1>
+              <p className="text-[10px] text-slate-500 hidden sm:block">SpeakKing — admin</p>
+            </div>
+            <div className="text-xs text-slate-500 truncate max-w-[100px]">{user?.email}</div>
           </div>
         </div>
       </header>
 
-      {/* Main Content */}
-      <main className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Stats Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+      <main className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
           {[
-            { icon: Users, label: 'Toplam Kullanici', value: stats?.total_users || 0, color: 'indigo' },
-            { icon: BookOpen, label: 'Toplam Konu', value: stats?.total_scenarios || 0, color: 'emerald' },
-            { icon: Clock, label: 'Toplam Oturum', value: stats?.total_sessions || 0, color: 'purple' },
-            { icon: Activity, label: 'Bugunku Oturum', value: stats?.today_sessions || 0, color: 'amber' }
+            { icon: Users, label: 'Kullanıcı', value: stats?.total_users || 0, color: 'text-indigo-400' },
+            { icon: BookOpen, label: 'Konu', value: stats?.total_scenarios || 0, color: 'text-emerald-400' },
+            { icon: Clock, label: 'Oturum', value: stats?.total_sessions || 0, color: 'text-purple-400' },
+            { icon: Activity, label: 'Bugün', value: stats?.today_sessions || 0, color: 'text-amber-400' },
           ].map((stat, index) => (
-            <motion.div key={stat.label} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: index * 0.1 }} className="glass p-4">
-              <stat.icon className={`w-5 h-5 text-${stat.color}-400 mb-2`} />
-              <p className="text-2xl font-heading font-semibold text-white">{stat.value}</p>
-              <p className="text-xs text-slate-400">{stat.label}</p>
+            <motion.div key={stat.label} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: index * 0.05 }} className="glass p-3 sm:p-4">
+              <stat.icon className={`w-5 h-5 ${stat.color} mb-1`} />
+              <p className="text-xl sm:text-2xl font-heading font-semibold text-white">{stat.value}</p>
+              <p className="text-[10px] sm:text-xs text-slate-400">{stat.label}</p>
             </motion.div>
           ))}
         </div>
 
-        {/* Tabs */}
-        <Tabs defaultValue="curriculum" className="space-y-6">
-          <TabsList className="glass p-1 flex-wrap">
-            <TabsTrigger value="curriculum" data-testid="curriculum-tab">
-              <GraduationCap className="w-4 h-4 mr-2" />Mufredat
-            </TabsTrigger>
-            <TabsTrigger value="sentences" data-testid="sentences-tab">
-              <FileText className="w-4 h-4 mr-2" />Cumle Bankasi
-            </TabsTrigger>
-            <TabsTrigger value="documents" data-testid="documents-tab">
-              <Upload className="w-4 h-4 mr-2" />Dokumanlar
-            </TabsTrigger>
-            <TabsTrigger value="ai-config" data-testid="ai-config-tab">
-              <Brain className="w-4 h-4 mr-2" />AI Egitimi
-            </TabsTrigger>
-            <TabsTrigger value="users" data-testid="users-tab">Kullanicilar</TabsTrigger>
-            <TabsTrigger value="packages" data-testid="packages-tab">
-              <CreditCard className="w-4 h-4 mr-2" />Paketler
-            </TabsTrigger>
-            <TabsTrigger value="settings" data-testid="settings-tab">Ayarlar</TabsTrigger>
-          </TabsList>
+        <div className="flex flex-col lg:flex-row gap-6">
+          {/* Sol menü — net etiketler */}
+          <aside className="lg:w-64 shrink-0">
+            <nav className="glass rounded-2xl p-2 space-y-0.5 sticky top-20">
+              <p className="px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                Bölümler
+              </p>
+              {ADMIN_SECTIONS.map((s) => {
+                const Icon = s.icon;
+                const on = activeSection === s.id;
+                return (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => selectSection(s.id)}
+                    className={`w-full flex items-start gap-3 rounded-xl px-3 py-2.5 text-left transition-colors ${
+                      on
+                        ? 'bg-indigo-600/30 text-white border border-indigo-500/40'
+                        : 'text-slate-400 hover:bg-white/5 hover:text-white border border-transparent'
+                    }`}
+                    data-testid={`nav-${s.id}`}
+                  >
+                    <Icon className={`w-4 h-4 mt-0.5 shrink-0 ${on ? 'text-indigo-300' : ''}`} />
+                    <span>
+                      <span className="block text-sm font-medium">{s.label}</span>
+                      <span className="block text-[11px] text-slate-500 leading-snug">{s.desc}</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </nav>
+          </aside>
+
+          <div className="flex-1 min-w-0">
+            <div className="mb-4">
+              <h2 className="text-xl font-heading text-white">{activeMeta.label}</h2>
+              <p className="text-sm text-slate-400">{activeMeta.desc}</p>
+            </div>
+
+            <Tabs value={activeSection} onValueChange={selectSection} className="space-y-6">
+              {/* Mobil yatay sekmeler */}
+              <TabsList className="glass p-1 flex lg:hidden overflow-x-auto w-full justify-start gap-1">
+                {ADMIN_SECTIONS.map((s) => (
+                  <TabsTrigger key={s.id} value={s.id} className="shrink-0 text-xs">
+                    {s.label}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
 
           {/* Curriculum Tab */}
           <TabsContent value="curriculum">
             <div className="space-y-6">
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-xl font-heading font-medium text-white">Mufredat Yapisi</h2>
-                  <p className="text-sm text-slate-400">
-                    Ana kategori (A1) → alt kutular (Başlangıç, Gelişmiş) → konular
-                  </p>
-                </div>
+                <p className="text-sm text-slate-400 max-w-xl">
+                  Ana kategori (A1) → alt kutular → konular. Öğrenci paneli buradaki yapıya göre dolar.
+                </p>
                 <div className="flex gap-2">
                   <Button
                     onClick={() => setShowAddCategoryModal(true)}
@@ -2170,6 +2269,8 @@ export default function AdminDashboard() {
             </div>
           </TabsContent>
         </Tabs>
+          </div>
+        </div>
       </main>
 
       {/* Yeni Ana Kategori */}

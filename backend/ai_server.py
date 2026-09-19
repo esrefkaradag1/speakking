@@ -1916,6 +1916,15 @@ def _cors_origins() -> List[str]:
     return origins or ["http://localhost:3000"]
 
 
+# iyzico paket odemeleri
+try:
+    from payments_iyzico import register_payment_routes
+
+    register_payment_routes(api_router, sb, get_current_user, get_admin_user)
+except Exception as _pay_err:
+    logger.warning("payments_iyzico yuklenemedi: %s", _pay_err)
+
+
 app.include_router(api_router)
 app.add_middleware(
     CORSMiddleware,

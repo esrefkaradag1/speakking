@@ -1,20 +1,33 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, CreditCard, Check, Clock, Plus } from 'lucide-react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { ArrowLeft, CreditCard, Check, Clock, Loader2, ShieldCheck } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { toast } from 'sonner';
 import { useAuth } from '../context/AuthContext';
-import { supabase } from '../lib/supabase';
 import { getActivePackages } from '../lib/packagesApi';
+import { getAuthHeaders, getAiApiBase } from '../lib/apiAuth';
+import axios from 'axios';
 
 export default function PaymentPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { user, refreshUser } = useAuth() || {};
   const [plans, setPlans] = useState([]);
   const [addons, setAddons] = useState([]);
   const [selected, setSelected] = useState('');
   const [buying, setBuying] = useState(false);
   const [loading, setLoading] = useState(true);
+
+  const status = searchParams.get('status');
+
+  useEffect(() => {
+    if (status === 'success') {
+      toast.success('Ödeme başarılı! Paket hakkınız güncellendi.');
+      refreshUser?.();
+    } else if (status === 'failed') {
+      toast.error('Ödeme tamamlanamadı. Tekrar deneyin veya destek ile iletişime geçin.');
+    }
+  }, [status, refreshUser]);
 
   useEffect(() => {
     let cancelled = false;
@@ -27,11 +40,11 @@ export default function PaymentPage() {
         setPlans(subs);
         setAddons(adds);
         const preferred =
-          subs.find((p) => p.highlight)?.code || subs[0]?.code || '';
+          subs.find((p) => p.highlight)?.code || subs[0]?.code || adds[0]?.code || '';
         setSelected(preferred);
       } catch (err) {
         console.error(err);
-        toast.error('Paketler yuklenemedi');
+        toast.error('Paketler yüklenemedi');
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -41,63 +54,50 @@ export default function PaymentPage() {
     };
   }, []);
 
-  const applyDailyBoost = async (extraMinutes) => {
-    if (!user?.id || !supabase) {
-      toast.info('Giriş yapın, sonra ekstra süre eklenecek.', { duration: 4000 });
+  const startIyzicoCheckout = async (packageCode) => {
+    if (!user) {
+      toast.info('Satın almak için giriş yapın');
+      navigate('/');
       return;
     }
     setBuying(true);
     try {
-      const { data: profile, error: rErr } = await supabase
-        .from('profiles')
-        .select('daily_limit_minutes')
-        .eq('id', user.id)
-        .single();
-      if (rErr) throw rErr;
-      const next = (profile?.daily_limit_minutes || 30) + extraMinutes;
-      const { error } = await supabase
-        .from('profiles')
-        .update({ daily_limit_minutes: next })
-        .eq('id', user.id);
-      if (error) throw error;
-      await refreshUser?.();
-      toast.success(`Bugüne +${extraMinutes} dk eklendi. Yeni limit: ${next} dk`);
+      const headers = await getAuthHeaders();
+      const { data } = await axios.post(
+        `${getAiApiBase()}/payments/iyzico/initialize`,
+        {
+          package_code: packageCode,
+          buyer_name: user.name || user.email?.split('@')[0] || 'Musteri',
+        },
+        { headers }
+      );
+      if (data?.payment_page_url) {
+        window.location.href = data.payment_page_url;
+        return;
+      }
+      if (data?.checkout_form_content) {
+        // Embed fallback
+        const w = window.open('', '_blank');
+        if (w) {
+          w.document.write(data.checkout_form_content);
+          w.document.close();
+        } else {
+          toast.error('Ödeme penceresi engellendi — tarayıcı pop-up iznini açın');
+        }
+        return;
+      }
+      throw new Error('iyzico yaniti gecersiz');
     } catch (err) {
       console.error(err);
-      toast.error('Süre eklenemedi — ödeme yakında; şimdilik admin kotayı artırabilir.');
+      const detail = err?.response?.data?.detail || err?.message || 'Ödeme başlatılamadı';
+      toast.error(typeof detail === 'string' ? detail : 'Ödeme başlatılamadı');
     } finally {
       setBuying(false);
     }
   };
 
-  const checkout = async () => {
-    const plan = plans.find((p) => p.code === selected);
-    if (!plan) return;
-    if (!user?.id || !supabase) {
-      toast.info('Ödeme için giriş yapın. Stripe yakında bağlanacak.', { duration: 5000 });
-      return;
-    }
-    setBuying(true);
-    try {
-      const { error } = await supabase
-        .from('profiles')
-        .update({ daily_limit_minutes: plan.daily_minutes })
-        .eq('id', user.id);
-      if (error) throw error;
-      await refreshUser?.();
-      toast.success(
-        `${plan.name} (${plan.daily_minutes} dk/gün) aktifleştirildi. Birden fazla paket alabilirsiniz.`,
-        { duration: 5000 }
-      );
-    } catch (err) {
-      console.error(err);
-      toast.info('Ödeme altyapısı yakında. Stripe bağlandığında buradan tamamlanacak.', {
-        duration: 5000,
-      });
-    } finally {
-      setBuying(false);
-    }
-  };
+  const selectedPlan =
+    [...plans, ...addons].find((p) => p.code === selected) || null;
 
   return (
     <div className="min-h-screen bg-[#0A0A0E] text-white">
@@ -109,19 +109,32 @@ export default function PaymentPage() {
         >
           <ArrowLeft className="w-4 h-4" /> Geri
         </button>
+
+        {status === 'success' && (
+          <div className="mb-6 rounded-2xl border border-emerald-500/40 bg-emerald-500/10 p-4 flex items-center gap-3">
+            <ShieldCheck className="w-6 h-6 text-emerald-400" />
+            <div>
+              <p className="font-medium text-emerald-300">Ödeme başarılı</p>
+              <p className="text-sm text-slate-400">Günlük pratik hakkınız güncellendi. Derse başlayabilirsiniz.</p>
+            </div>
+          </div>
+        )}
+
         <div className="flex items-center gap-3 mb-2">
           <CreditCard className="w-7 h-7 text-indigo-400" />
-          <h1 className="text-3xl font-heading">Abonelik & Ödeme</h1>
+          <h1 className="text-3xl font-heading">Paketler & Ödeme</h1>
         </div>
         <p className="text-slate-400 mb-8 max-w-2xl">
-          İstediğiniz kadar paket alabilirsiniz; bitmesini beklemeniz gerekmez. Kota dolunca aynı güne ekstra süre ekleyin.
+          Güvenli ödeme <strong className="text-slate-300">iyzico</strong> ile yapılır. Kart bilgileriniz SpeakKing sunucularında tutulmaz.
         </p>
 
-        <h2 className="text-sm font-bold uppercase tracking-wider text-slate-500 mb-4">Paketler</h2>
+        <h2 className="text-sm font-bold uppercase tracking-wider text-slate-500 mb-4">Abonelik paketleri</h2>
         {loading ? (
-          <p className="text-slate-500 mb-12">Paketler yükleniyor…</p>
+          <p className="text-slate-500 mb-12 flex items-center gap-2">
+            <Loader2 className="w-4 h-4 animate-spin" /> Paketler yükleniyor…
+          </p>
         ) : (
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-12">
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
             {plans.map((plan) => (
               <button
                 key={plan.code}
@@ -157,39 +170,57 @@ export default function PaymentPage() {
           </div>
         )}
 
-        <Button
-          onClick={checkout}
-          disabled={buying || !selected}
-          className="bg-indigo-600 hover:bg-indigo-500 rounded-full px-8 mb-14"
-        >
-          Seçili paketi satınal / yenile
-        </Button>
-
         {addons.length > 0 && (
-          <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-6">
-            <div className="flex items-center gap-2 mb-2">
-              <Clock className="w-5 h-5 text-amber-400" />
-              <h2 className="text-lg font-medium">Bugüne özel ekstra süre</h2>
-            </div>
-            <p className="text-sm text-slate-400 mb-4">
-              Günlük kotanız bitti ama devam etmek istiyorsanız ekstra süre ekleyin.
-            </p>
-            <div className="flex flex-wrap gap-3">
+          <>
+            <h2 className="text-sm font-bold uppercase tracking-wider text-slate-500 mb-4 flex items-center gap-2">
+              <Clock className="w-4 h-4 text-amber-400" /> Bugüne özel ekstra süre
+            </h2>
+            <div className="grid sm:grid-cols-2 gap-4 mb-8">
               {addons.map((a) => (
-                <Button
+                <button
                   key={a.code}
                   type="button"
-                  disabled={buying}
-                  onClick={() => applyDailyBoost(a.daily_minutes)}
-                  className="bg-amber-600 hover:bg-amber-500 rounded-full"
+                  onClick={() => setSelected(a.code)}
+                  className={`text-left rounded-2xl border p-5 transition-all ${
+                    selected === a.code
+                      ? 'border-amber-500 bg-amber-500/10'
+                      : 'border-white/10 bg-white/5 hover:border-white/20'
+                  }`}
                 >
-                  <Plus className="w-4 h-4 mr-1" />
-                  {a.name} — {Number(a.price_tl).toLocaleString('tr-TR')} TL
-                </Button>
+                  <h3 className="text-base font-medium mb-1">{a.name}</h3>
+                  <p className="text-2xl font-bold text-amber-300">
+                    {Number(a.price_tl).toLocaleString('tr-TR')} TL
+                  </p>
+                  <p className="text-xs text-slate-500 mt-1">+{a.daily_minutes} dakika bugünkü kota</p>
+                </button>
               ))}
             </div>
-          </div>
+          </>
         )}
+
+        <div className="flex flex-wrap items-center gap-4">
+          <Button
+            onClick={() => selectedPlan && startIyzicoCheckout(selectedPlan.code)}
+            disabled={buying || !selectedPlan}
+            className="bg-indigo-600 hover:bg-indigo-500 rounded-full px-8 h-12 text-base"
+          >
+            {buying ? (
+              <>
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" /> iyzico açılıyor…
+              </>
+            ) : (
+              <>
+                <CreditCard className="w-4 h-4 mr-2" />
+                {selectedPlan
+                  ? `iyzico ile öde — ${Number(selectedPlan.price_tl).toLocaleString('tr-TR')} TL`
+                  : 'Paket seçin'}
+              </>
+            )}
+          </Button>
+          <p className="text-xs text-slate-500 max-w-sm">
+            Ödeme sonrası otomatik yönlendirilirsiniz; kota anında artar.
+          </p>
+        </div>
       </div>
     </div>
   );

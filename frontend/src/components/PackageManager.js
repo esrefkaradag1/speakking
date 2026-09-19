@@ -1,6 +1,15 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
-import { Plus, Trash2, Save, CreditCard, RefreshCw } from 'lucide-react';
+import {
+  Plus,
+  Trash2,
+  Save,
+  CreditCard,
+  RefreshCw,
+  ShieldCheck,
+  AlertTriangle,
+  ExternalLink,
+} from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
@@ -25,6 +34,8 @@ import {
   updatePackage,
   deletePackage,
 } from '../lib/packagesApi';
+import { getAuthHeaders, getAiApiBase } from '../lib/apiAuth';
+import axios from 'axios';
 
 const emptyForm = () => ({
   code: '',
@@ -75,24 +86,49 @@ function fromForm(form) {
   };
 }
 
+const STATUS_TR = {
+  pending: { label: 'Bekliyor', className: 'text-amber-400' },
+  paid: { label: 'Ödendi', className: 'text-emerald-400' },
+  failed: { label: 'Başarısız', className: 'text-red-400' },
+  cancelled: { label: 'İptal', className: 'text-slate-500' },
+};
+
 export default function PackageManager() {
   const [packages, setPackages] = useState([]);
+  const [orders, setOrders] = useState([]);
+  const [iyzico, setIyzico] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [editing, setEditing] = useState(null); // null | 'new' | package
+  const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(emptyForm());
+
+  const loadMeta = useCallback(async () => {
+    try {
+      const headers = await getAuthHeaders();
+      const base = getAiApiBase();
+      const [statusRes, ordersRes] = await Promise.all([
+        axios.get(`${base}/payments/iyzico/status`, { headers }).catch(() => null),
+        axios.get(`${base}/payments/orders`, { headers }).catch(() => null),
+      ]);
+      if (statusRes?.data) setIyzico(statusRes.data);
+      if (ordersRes?.data?.orders) setOrders(ordersRes.data.orders);
+    } catch {
+      /* panel yine de paketleri gösterir */
+    }
+  }, []);
 
   const load = async () => {
     setLoading(true);
     try {
       const rows = await getPackagesAdmin();
       setPackages(rows);
+      await loadMeta();
     } catch (err) {
       console.error(err);
       toast.error(
         err?.message?.includes('relation') || err?.code === '42P01'
           ? 'packages tablosu yok — SQL: supabase/packages.sql'
-          : err?.message || 'Paketler yuklenemedi'
+          : err?.message || 'Paketler yüklenemedi'
       );
       setPackages([]);
     } finally {
@@ -102,6 +138,7 @@ export default function PackageManager() {
 
   useEffect(() => {
     load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const openNew = () => {
@@ -132,7 +169,7 @@ export default function PackageManager() {
         toast.success('Paket eklendi');
       } else {
         await updatePackage(editing.id, payload);
-        toast.success('Paket guncellendi');
+        toast.success('Paket güncellendi');
       }
       closeModal();
       await load();
@@ -149,7 +186,7 @@ export default function PackageManager() {
       await updatePackage(pkg.id, { is_active: !pkg.is_active });
       await load();
     } catch (err) {
-      toast.error(err?.message || 'Guncellenemedi');
+      toast.error(err?.message || 'Güncellenemedi');
     }
   };
 
@@ -169,15 +206,71 @@ export default function PackageManager() {
 
   return (
     <div className="space-y-6">
+      {/* iyzico durum kartı */}
+      <div
+        className={`rounded-2xl border p-4 ${
+          iyzico?.configured
+            ? 'border-emerald-500/30 bg-emerald-500/5'
+            : 'border-amber-500/30 bg-amber-500/5'
+        }`}
+      >
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="flex items-start gap-3">
+            {iyzico?.configured ? (
+              <ShieldCheck className="w-5 h-5 text-emerald-400 mt-0.5 shrink-0" />
+            ) : (
+              <AlertTriangle className="w-5 h-5 text-amber-400 mt-0.5 shrink-0" />
+            )}
+            <div>
+              <p className="text-sm font-medium text-white">
+                iyzico ödeme{' '}
+                {iyzico?.configured ? (
+                  <span className="text-emerald-400">hazır</span>
+                ) : (
+                  <span className="text-amber-400">yapılandırılmamış</span>
+                )}
+              </p>
+              <p className="text-xs text-slate-400 mt-1 max-w-xl">
+                Kullanıcılar <code className="text-slate-300">/payment</code> sayfasından paket
+                seçip iyzico Checkout Form ile öder. Başarılı ödemede günlük dakika kotası otomatik
+                artar.
+              </p>
+              {iyzico && (
+                <ul className="mt-2 text-[11px] text-slate-500 space-y-0.5 font-mono">
+                  <li>API: {iyzico.base_url}</li>
+                  <li>Callback: {iyzico.callback_url}</li>
+                  <li>Site: {iyzico.public_url}</li>
+                </ul>
+              )}
+              {!iyzico?.configured && (
+                <p className="text-xs text-amber-300/90 mt-2">
+                  Dokploy env: <code>IYZICO_API_KEY</code>, <code>IYZICO_SECRET_KEY</code>,{' '}
+                  <code>IYZICO_BASE_URL</code>, <code>APP_PUBLIC_URL</code>. SQL:{' '}
+                  <code>packages.sql</code> + <code>payment-orders.sql</code>
+                </p>
+              )}
+            </div>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="border-white/20 text-white"
+            onClick={() => window.open('/payment', '_blank')}
+          >
+            <ExternalLink className="w-3.5 h-3.5 mr-1.5" />
+            Ödeme sayfası
+          </Button>
+        </div>
+      </div>
+
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-heading font-medium text-white flex items-center gap-2">
+          <h3 className="text-lg font-heading font-medium text-white flex items-center gap-2">
             <CreditCard className="w-5 h-5 text-indigo-400" />
-            Paket Yonetimi
-          </h2>
+            Paket kataloğu
+          </h3>
           <p className="text-sm text-slate-400">
-            Odeme sayfasindaki abonelik ve ekstra sure paketlerini duzenleyin. Once{' '}
-            <code className="text-amber-400/90">supabase/packages.sql</code> calistirin.
+            Fiyat ve dakika buradan yönetilir; öğrenci ödeme sayfasında görür.
           </p>
         </div>
         <div className="flex gap-2">
@@ -192,13 +285,13 @@ export default function PackageManager() {
           </Button>
           <Button onClick={openNew} className="bg-indigo-600 hover:bg-indigo-500">
             <Plus className="w-4 h-4 mr-2" />
-            Yeni Paket
+            Yeni paket
           </Button>
         </div>
       </div>
 
       {loading ? (
-        <p className="text-slate-500">Yukleniyor…</p>
+        <p className="text-slate-500">Yükleniyor…</p>
       ) : (
         <>
           <section className="glass rounded-xl overflow-hidden">
@@ -213,11 +306,11 @@ export default function PackageManager() {
                   <tr className="text-left text-slate-500 border-b border-white/5">
                     <th className="p-3">Kod</th>
                     <th className="p-3">Ad</th>
-                    <th className="p-3">Dk/gun</th>
+                    <th className="p-3">Dk/gün</th>
                     <th className="p-3">Fiyat</th>
                     <th className="p-3">TL/dk</th>
                     <th className="p-3">Aktif</th>
-                    <th className="p-3">Sira</th>
+                    <th className="p-3">Sıra</th>
                     <th className="p-3" />
                   </tr>
                 </thead>
@@ -241,10 +334,20 @@ export default function PackageManager() {
                       </td>
                       <td className="p-3 text-slate-500">{pkg.sort_order}</td>
                       <td className="p-3 text-right space-x-2">
-                        <Button size="sm" variant="outline" className="border-white/20" onClick={() => openEdit(pkg)}>
-                          Duzenle
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="border-white/20"
+                          onClick={() => openEdit(pkg)}
+                        >
+                          Düzenle
                         </Button>
-                        <Button size="sm" variant="ghost" className="text-red-400" onClick={() => remove(pkg)}>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="text-red-400"
+                          onClick={() => remove(pkg)}
+                        >
                           <Trash2 className="w-4 h-4" />
                         </Button>
                       </td>
@@ -253,7 +356,7 @@ export default function PackageManager() {
                   {!subs.length && (
                     <tr>
                       <td colSpan={8} className="p-6 text-center text-slate-500">
-                        Abonelik paketi yok
+                        Abonelik paketi yok — «Yeni paket» ile ekleyin
                       </td>
                     </tr>
                   )}
@@ -265,7 +368,7 @@ export default function PackageManager() {
           <section className="glass rounded-xl overflow-hidden">
             <div className="px-4 py-3 border-b border-white/10">
               <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400">
-                Ekstra sure (addon) ({adds.length})
+                Ekstra süre (addon) ({adds.length})
               </h3>
             </div>
             <div className="overflow-x-auto">
@@ -293,10 +396,20 @@ export default function PackageManager() {
                         <Switch checked={pkg.is_active} onCheckedChange={() => toggleActive(pkg)} />
                       </td>
                       <td className="p-3 text-right space-x-2">
-                        <Button size="sm" variant="outline" className="border-white/20" onClick={() => openEdit(pkg)}>
-                          Duzenle
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="border-white/20"
+                          onClick={() => openEdit(pkg)}
+                        >
+                          Düzenle
                         </Button>
-                        <Button size="sm" variant="ghost" className="text-red-400" onClick={() => remove(pkg)}>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="text-red-400"
+                          onClick={() => remove(pkg)}
+                        >
                           <Trash2 className="w-4 h-4" />
                         </Button>
                       </td>
@@ -313,15 +426,81 @@ export default function PackageManager() {
               </table>
             </div>
           </section>
+
+          <section className="glass rounded-xl overflow-hidden">
+            <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between">
+              <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400">
+                Son siparişler ({orders.length})
+              </h3>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="text-slate-400"
+                onClick={loadMeta}
+              >
+                <RefreshCw className="w-3.5 h-3.5 mr-1" />
+                Güncelle
+              </Button>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-slate-500 border-b border-white/5">
+                    <th className="p-3">Tarih</th>
+                    <th className="p-3">Paket</th>
+                    <th className="p-3">Tutar</th>
+                    <th className="p-3">Dk</th>
+                    <th className="p-3">Durum</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {orders.slice(0, 40).map((o) => {
+                    const st = STATUS_TR[o.status] || {
+                      label: o.status,
+                      className: 'text-slate-400',
+                    };
+                    return (
+                      <tr key={o.id} className="border-b border-white/5">
+                        <td className="p-3 text-slate-400 text-xs whitespace-nowrap">
+                          {o.created_at
+                            ? new Date(o.created_at).toLocaleString('tr-TR')
+                            : '—'}
+                        </td>
+                        <td className="p-3 text-white">
+                          <span className="block">{o.package_name || o.package_code}</span>
+                          <span className="text-[10px] font-mono text-slate-500">
+                            {o.package_code}
+                          </span>
+                        </td>
+                        <td className="p-3 text-slate-300">
+                          {Number(o.amount_tl).toLocaleString('tr-TR')} TL
+                        </td>
+                        <td className="p-3 text-slate-400">{o.daily_minutes}</td>
+                        <td className={`p-3 font-medium ${st.className}`}>{st.label}</td>
+                      </tr>
+                    );
+                  })}
+                  {!orders.length && (
+                    <tr>
+                      <td colSpan={5} className="p-6 text-center text-slate-500">
+                        Henüz sipariş yok — veya{' '}
+                        <code className="text-amber-400/80">payment-orders.sql</code> çalıştırılmamış
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
         </>
       )}
 
       <Dialog open={!!editing} onOpenChange={(open) => !open && closeModal()}>
         <DialogContent className="bg-slate-900 border-white/10 text-white max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{editing === 'new' ? 'Yeni paket' : 'Paketi duzenle'}</DialogTitle>
+            <DialogTitle>{editing === 'new' ? 'Yeni paket' : 'Paketi düzenle'}</DialogTitle>
             <DialogDescription className="text-slate-400">
-              Degisiklikler odeme sayfasina aninda yansir (aktif paketler).
+              Değişiklikler ödeme sayfasına anında yansır (aktif paketler).
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 py-2">
@@ -346,7 +525,7 @@ export default function PackageManager() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="subscription">Abonelik</SelectItem>
-                    <SelectItem value="addon">Ekstra sure</SelectItem>
+                    <SelectItem value="addon">Ekstra süre</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -361,7 +540,7 @@ export default function PackageManager() {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <Label>{form.package_type === 'addon' ? 'Dakika (+)' : 'Gunluk dakika'}</Label>
+                <Label>{form.package_type === 'addon' ? 'Dakika (+)' : 'Günlük dakika'}</Label>
                 <Input
                   type="number"
                   value={form.daily_minutes}
@@ -381,7 +560,7 @@ export default function PackageManager() {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <Label>Sure etiketi</Label>
+                <Label>Süre etiketi</Label>
                 <Input
                   value={form.period_label}
                   onChange={(e) => setForm((f) => ({ ...f, period_label: e.target.value }))}
@@ -390,7 +569,7 @@ export default function PackageManager() {
                 />
               </div>
               <div>
-                <Label>Birim ucret (TL/dk)</Label>
+                <Label>Birim ücret (TL/dk)</Label>
                 <Input
                   value={form.per_min_label}
                   onChange={(e) => setForm((f) => ({ ...f, per_min_label: e.target.value }))}
@@ -400,7 +579,7 @@ export default function PackageManager() {
               </div>
             </div>
             <div>
-              <Label>Ozellikler (her satir bir madde)</Label>
+              <Label>Özellikler (her satır bir madde)</Label>
               <textarea
                 value={form.featuresText}
                 onChange={(e) => setForm((f) => ({ ...f, featuresText: e.target.value }))}
@@ -409,7 +588,7 @@ export default function PackageManager() {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <Label>Sira</Label>
+                <Label>Sıra</Label>
                 <Input
                   type="number"
                   value={form.sort_order}
@@ -423,7 +602,7 @@ export default function PackageManager() {
                     checked={form.highlight}
                     onCheckedChange={(v) => setForm((f) => ({ ...f, highlight: v }))}
                   />
-                  One cikan
+                  Öne çıkan
                 </label>
                 <label className="flex items-center gap-2 text-sm">
                   <Switch
@@ -434,7 +613,11 @@ export default function PackageManager() {
                 </label>
               </div>
             </div>
-            <Button onClick={save} disabled={saving} className="w-full bg-indigo-600 hover:bg-indigo-500">
+            <Button
+              onClick={save}
+              disabled={saving}
+              className="w-full bg-indigo-600 hover:bg-indigo-500"
+            >
               <Save className="w-4 h-4 mr-2" />
               {saving ? 'Kaydediliyor…' : 'Kaydet'}
             </Button>

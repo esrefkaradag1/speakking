@@ -17,3 +17,4 @@ starlette==0.37.2
 openai==1.99.9
 google-generativeai>=0.8.0
 supabase>=2.0.0
+iyzipay>=1.0.45
